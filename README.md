@@ -33,6 +33,14 @@ they see the skill.
 
 Requires Claude Code, git and Python 3. The viewer requires Herdr.
 
+Herdr reloads a mod when something under `~/.config/herdr-app/mods/` changes,
+but edits made through the link land in the checkout, where it doesn't look.
+After editing the viewer (or pulling), reload it with:
+
+```sh
+touch -h ~/.config/herdr-app/mods/pr-tour
+```
+
 ## Use
 
 In the Claude Code session that wrote or knows the change:
