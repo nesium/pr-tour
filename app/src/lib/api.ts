@@ -29,6 +29,8 @@ export interface FileDiff {
   diff: { Ok: string } | { Err: string };
   /** The file at head; null when binary or deleted. */
   lines: string | null;
+  /** The file at base; null when binary or added. */
+  base_lines: string | null;
 }
 
 export const api = {

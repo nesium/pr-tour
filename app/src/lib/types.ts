@@ -19,6 +19,8 @@ export type RowIndex = Brand<number, "RowIndex">;
 export type HunkIndex = Brand<number, "HunkIndex">;
 /** Identifies one anchor's diff box on a page, e.g. `parse-diff-0`. */
 export type AnchorKey = Brand<string, "AnchorKey">;
+/** One side of one file: `<file>#old` or `<file>#new`. Highlighted lines are kept under it. */
+export type HighlightKey = Brand<string, "HighlightKey">;
 /** One tour of one commit in one repository; review progress is stored under it. */
 export type ProgressKey = Brand<string, "ProgressKey">;
 
@@ -71,3 +73,4 @@ export type Entry = { id: "overview" } | { id: "concerns" } | { id: StepId; step
 
 export const anchorKey = (entry: EntryId | `concern-${number}`, index: number) => `${entry}-${index}` as AnchorKey;
 export const shortCommit = (sha: CommitId | null | undefined) => (sha ?? "").slice(0, 7);
+export const highlightKey = (file: RepoFile, side: Side) => `${file}#${side}` as HighlightKey;

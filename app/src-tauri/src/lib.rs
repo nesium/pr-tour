@@ -27,6 +27,7 @@ pub fn run(args: Vec<String>, starting: LaunchLock) {
         }))
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(Windows::default())
         .setup(move |app| {
             // Plugins have run: the single-instance socket is bound.

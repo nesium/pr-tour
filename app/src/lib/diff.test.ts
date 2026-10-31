@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorWindow, expandUp, fileRows, parseDiff, parseFile, windowItems, type DiffItem } from "./diff";
+import { anchorWindow, expandUp, fileRows, parseDiff, parseFile, splitItems, windowItems, type DiffItem } from "./diff";
 import type { Anchor, LineNumber, RepoFile, RowIndex } from "./types";
 
 const anchor = (start: number, end: number, side?: "old" | "new"): Anchor => ({
@@ -104,5 +104,31 @@ describe("windows", () => {
     const { items, truncated } = windowItems(rows, hunks, window, 5);
     expect(items.filter((i) => i.type === "row")).toHaveLength(5);
     expect(truncated).toBe(true);
+  });
+});
+
+describe("splitItems", () => {
+  const row = (kind: "+" | "-" | " ", n: number): DiffItem => ({
+    type: "row",
+    key: `row-${n}`,
+    index: n as RowIndex,
+    row: { kind, text: `${kind}${n}`, ...(kind !== "+" ? { old: n as LineNumber } : {}), ...(kind !== "-" ? { new: n as LineNumber } : {}) },
+  });
+  const shape = (items: ReturnType<typeof splitItems>) =>
+    items.map((i) => (i.type === "pair" ? `${i.left?.text ?? "_"}|${i.right?.text ?? "_"}` : i.type));
+
+  it("pairs removed with added lines and pads the shorter side", () => {
+    const items = [row(" ", 1), row("-", 2), row("-", 3), row("+", 4), row(" ", 5)];
+    expect(shape(splitItems(items))).toEqual([" 1| 1", "-2|+4", "-3|_", " 5| 5"]);
+  });
+
+  it("starts a new change when removals follow additions", () => {
+    const items = [row("+", 1), row("-", 2), row("+", 3)];
+    expect(shape(splitItems(items))).toEqual(["_|+1", "-2|+3"]);
+  });
+
+  it("keeps folds and jumps full width", () => {
+    const fold: DiffItem = { type: "fold", key: "fold-3", start: 3 as RowIndex, count: 12 };
+    expect(shape(splitItems([row("-", 1), fold, row("+", 2)]))).toEqual(["-1|_", "fold", "_|+2"]);
   });
 });

@@ -1,15 +1,25 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide } from "vue";
+import { computed, onBeforeUnmount, onMounted, provide, ref } from "vue";
 import ConcernsPage from "./components/ConcernsPage.vue";
 import NoTour from "./components/NoTour.vue";
 import OverviewPage from "./components/OverviewPage.vue";
 import StepPage from "./components/StepPage.vue";
 import TourSidebar from "./components/TourSidebar.vue";
 import { shortCommit } from "./lib/types";
+import { useSearchHighlight } from "./lib/useSearchHighlight";
 import { createTourState, TOUR } from "./lib/useTour";
 
 const tour = createTourState();
 provide(TOUR, tour);
+
+const sidebar = ref<InstanceType<typeof TourSidebar> | null>(null);
+const detail = ref<HTMLElement | null>(null);
+const { revealFirst } = useSearchHighlight(detail, tour.searched);
+
+function nextMatch(delta: number) {
+  tour.nextMatch(delta);
+  revealFirst();
+}
 
 const loaded = computed(() => tour.tour.value);
 const reviewedCount = computed(() => loaded.value?.steps.filter((s) => tour.progress.value.done[s.id]).length ?? 0);
@@ -17,7 +27,14 @@ const currentStep = computed(() => (tour.current.value && "step" in tour.current
 const currentDone = computed(() => Boolean(currentStep.value && tour.progress.value.done[currentStep.value.id]));
 
 function onKey(event: KeyboardEvent) {
-  if (!loaded.value || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (!loaded.value) return;
+  if ((event.metaKey || event.ctrlKey) && event.key === "f") {
+    event.preventDefault();
+    sidebar.value?.focusSearch();
+    return;
+  }
+  const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+  if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
   const actions: Record<string, () => void> = {
     j: () => tour.move(1),
     ArrowDown: () => tour.move(1),
@@ -28,6 +45,9 @@ function onKey(event: KeyboardEvent) {
       tour.move(1);
     },
     f: () => tour.toggleFilter(),
+    s: () => tour.toggleDiffView(),
+    w: () => tour.toggleWrap(),
+    "/": () => sidebar.value?.focusSearch(),
   };
   const action = actions[event.key];
   if (!action) return;
@@ -52,6 +72,19 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <span class="small dim">{{ shortCommit(loaded.base_sha) }}..{{ shortCommit(loaded.head_sha) }}</span>
         <span class="spacer" />
         <span class="small muted">{{ reviewedCount }}/{{ loaded.steps.length }} reviewed</span>
+        <div class="segmented">
+          <button :class="{ on: tour.preferences.value.diffView === 'unified' }" @click="tour.setDiffView('unified')">Unified</button>
+          <button :class="{ on: tour.preferences.value.diffView === 'split' }" @click="tour.setDiffView('split')">Split</button>
+        </div>
+        <button
+          class="filter"
+          :class="{ on: tour.preferences.value.wrap || tour.preferences.value.diffView === 'split' }"
+          :disabled="tour.preferences.value.diffView === 'split'"
+          title="The split view always wraps"
+          @click="tour.toggleWrap()"
+        >
+          Wrap
+        </button>
         <button class="filter" :class="{ on: tour.closelyOnly.value }" @click="tour.toggleFilter()">
           {{ tour.closelyOnly.value ? "● Read closely only" : "○ Read closely only" }}
         </button>
@@ -65,8 +98,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       </details>
     </header>
     <div class="main">
-      <TourSidebar :concern-count="loaded.concerns.length" />
-      <main :key="tour.current.value?.id" class="detail">
+      <TourSidebar ref="sidebar" :concern-count="loaded.concerns.length" @next-match="nextMatch" />
+      <main :key="tour.current.value?.id" ref="detail" class="detail">
         <OverviewPage v-if="tour.current.value?.id === 'overview'" :tour="loaded" />
         <ConcernsPage v-else-if="tour.current.value?.id === 'concerns'" :concerns="loaded.concerns" />
         <StepPage v-else-if="currentStep" :step="currentStep" />
@@ -75,7 +108,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
     <footer class="bottom">
       <button class="button" @click="tour.move(-1)">← Prev</button>
       <button class="button" @click="tour.move(1)">Next →</button>
-      <span class="spacer small dim">j/k move · space reviewed + next · f filter</span>
+      <span class="spacer small dim">j/k move · space reviewed + next · f filter · s split · w wrap · / search</span>
       <button v-if="currentStep" class="button" :class="{ primary: !currentDone }" @click="tour.toggleDone(currentStep.id)">
         {{ currentDone ? "✓ Reviewed" : "Mark reviewed" }}
       </button>
@@ -119,6 +152,30 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   font: inherit;
   font-size: 11px;
   cursor: pointer;
+}
+.filter:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.segmented {
+  display: flex;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.segmented button {
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.segmented button.on {
+  background: var(--selected);
+  color: var(--fg);
 }
 .filter.on {
   border-color: var(--accent);

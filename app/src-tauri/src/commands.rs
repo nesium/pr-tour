@@ -18,9 +18,12 @@ pub struct TourFile {
 #[derive(Serialize)]
 pub struct FileDiff {
     diff: Result<String, String>,
-    /// The file at head, for the unchanged lines between hunks. None when it's
-    /// binary or deleted at head.
+    /// The file at head, for the unchanged lines between hunks and highlighting.
+    /// None when it's binary or deleted at head.
     lines: Option<String>,
+    /// The file at base, for highlighting removed lines. None when it's binary
+    /// or added by the branch.
+    base_lines: Option<String>,
 }
 
 #[tauri::command]
@@ -48,11 +51,15 @@ pub async fn branch_tip(root: RepoRoot, branch: BranchName) -> Option<CommitId> 
 #[tauri::command]
 pub async fn file_diff(root: RepoRoot, base: CommitId, head: CommitId, file: RepoFile) -> Result<FileDiff, String> {
     let diff_args = ["diff", "--no-ext-diff", "--no-color", base.as_str(), head.as_str(), "--", file.as_str()];
-    let at_head = format!("{head}:{file}");
-    let show_args = ["show", "--no-textconv", &at_head];
-    let (diff, show) = tokio::join!(git::run(root.as_path(), &diff_args), git::run(root.as_path(), &show_args));
-    let lines = show.ok().filter(|s| s.success && !s.stdout.contains(&0)).map(|s| s.text());
-    Ok(FileDiff { diff: diff?.into_result(&diff_args), lines })
+    let (at_head, at_base) = (format!("{head}:{file}"), format!("{base}:{file}"));
+    let (show_head, show_base) = (["show", "--no-textconv", &at_head], ["show", "--no-textconv", &at_base]);
+    let (diff, head_text, base_text) = tokio::join!(
+        git::run(root.as_path(), &diff_args),
+        git::run(root.as_path(), &show_head),
+        git::run(root.as_path(), &show_base),
+    );
+    let text = |shown: Result<git::Output, String>| shown.ok().filter(|s| s.success && !s.stdout.contains(&0)).map(|s| s.text());
+    Ok(FileDiff { diff: diff?.into_result(&diff_args), lines: text(head_text), base_lines: text(base_text) })
 }
 
 #[tauri::command]

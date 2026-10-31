@@ -1,13 +1,20 @@
 <script setup lang="ts">
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { computed } from "vue";
 import { renderMarkdown } from "../lib/markdown";
 
 const props = defineProps<{ text: string }>();
 const html = computed(() => renderMarkdown(props.text));
 
-// Links would replace the tour in this window; opening them in a browser comes later.
+const EXTERNAL = /^(https?:|mailto:)/i;
+
+// A link would replace the tour in this window: web links open in the browser, others nowhere.
 function keepTour(event: MouseEvent) {
-  if ((event.target as HTMLElement).closest("a")) event.preventDefault();
+  const link = (event.target as HTMLElement).closest("a");
+  if (!link) return;
+  event.preventDefault();
+  const href = link.getAttribute("href") ?? "";
+  if (EXTERNAL.test(href)) void openUrl(href);
 }
 </script>
 

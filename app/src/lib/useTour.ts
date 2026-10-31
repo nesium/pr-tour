@@ -1,9 +1,13 @@
 import { computed, reactive, ref, shallowReactive, shallowRef, watch, type InjectionKey } from "vue";
 import { api, type FileDiff, type GenerationState, type Located } from "./api";
 import { anchorWindow, parseFile, type DiffWindow, type ParsedDiff, type Row } from "./diff";
+import type { HighlightedLines } from "./highlight";
+import { highlightFile } from "./highlighter";
+import { readPreferences, writePreferences, type DiffView, type Preferences } from "./preferences";
 import { progressKey, readProgress, writeProgress } from "./progress";
+import { entryMatches, searchQuery, type CodeOf } from "./search";
 import { anchoredFiles, entries, filesOf, isStep, parseTour } from "./tour";
-import type { Anchor, AnchorKey, CommitId, EntryId, Progress, ProgressKey, RepoFile, Tour } from "./types";
+import { highlightKey, type Anchor, type AnchorKey, type CommitId, type EntryId, type HighlightKey, type Progress, type ProgressKey, type RepoFile, type Side, type Tour } from "./types";
 
 /** git processes reading diffs at once. More stay queued, current page first. */
 const PARALLEL_DIFFS = 8;
@@ -32,6 +36,10 @@ export function createTourState() {
   // Parsed diffs can hold thousands of rows each; only the map itself is reactive.
   const diffs = shallowReactive(new Map<RepoFile, DiffState>());
   const windows = new Map<AnchorKey, DiffWindow>();
+  // Coloured lines per file side, filled in by the highlighting worker as it gets to them.
+  const highlights = shallowReactive(new Map<HighlightKey, HighlightedLines>());
+  const preferences = ref<Preferences>({ diffView: "unified", wrap: false });
+  const query = ref("");
 
   let key: ProgressKey | null = null;
   let loadNumber = 0;
@@ -41,6 +49,43 @@ export function createTourState() {
   const list = computed(() => (tour.value ? entries(tour.value, closelyOnly.value) : []));
   const current = computed(() => list.value.find((e) => e.id === progress.value.current) ?? list.value[0]);
   const stale = computed(() => Boolean(tip.value && tour.value && tip.value !== tour.value.head_sha));
+
+  /** The lines an anchor shows when its page opens, once its diff has loaded. */
+  const codeOf: CodeOf = (anchor) => {
+    const state = diffs.get(anchor.file);
+    if (state?.status !== "ready") return null;
+    const window = anchorWindow(state.diff.rows, anchor);
+    return window ? state.diff.rows.slice(window.lo, window.hi + 1).map((r) => r.text) : [];
+  };
+  const searched = computed(() => searchQuery(query.value));
+  /** The entries that match the search, or null while there is no search. */
+  const matching = computed(() => {
+    const reviewed = tour.value;
+    const wanted = searched.value;
+    if (!reviewed || !wanted) return null;
+    return new Set(list.value.filter((e) => entryMatches(reviewed, e, wanted, codeOf)).map((e) => e.id));
+  });
+
+  /** Goes to the next entry that matches the search, after the current one. */
+  function nextMatch(delta = 1) {
+    const found = matching.value;
+    if (!found?.size) return;
+    const count = list.value.length;
+    const at = list.value.findIndex((e) => e.id === progress.value.current);
+    for (let step = 1; step <= count; step++) {
+      const entry = list.value[(((at + step * delta) % count) + count) % count];
+      if (found.has(entry.id)) return go(entry.id);
+    }
+  }
+
+  function setPreferences(change: Partial<Preferences>) {
+    preferences.value = { ...preferences.value, ...change };
+    void writePreferences(preferences.value);
+  }
+
+  const setDiffView = (diffView: DiffView) => setPreferences({ diffView });
+  const toggleDiffView = () => setDiffView(preferences.value.diffView === "split" ? "unified" : "split");
+  const toggleWrap = () => setPreferences({ wrap: !preferences.value.wrap });
 
   function setProgress(change: Partial<Progress>) {
     progress.value = { ...progress.value, ...change };
@@ -104,15 +149,29 @@ export function createTourState() {
       active++;
       api
         .fileDiff(at.root, reviewed.base_sha, reviewed.head_sha, file)
-        .then(toDiffState, (e): DiffState => ({ status: "error", message: String(e) }))
-        .then((state) => {
-          if (loadedFor === loadNumber) diffs.set(file, state);
-        })
+        .then(
+          (read) => {
+            if (loadedFor !== loadNumber) return;
+            diffs.set(file, toDiffState(read));
+            highlight(file, "new", read.lines, loadedFor);
+            highlight(file, "old", read.base_lines, loadedFor);
+          },
+          (e) => {
+            if (loadedFor === loadNumber) diffs.set(file, { status: "error", message: String(e) });
+          },
+        )
         .finally(() => {
           active--;
           pump();
         });
     }
+  }
+
+  function highlight(file: RepoFile, side: Side, code: string | null, loadedFor: number) {
+    if (code === null) return;
+    void highlightFile(file, code).then((lines) => {
+      if (lines && loadedFor === loadNumber) highlights.set(highlightKey(file, side), lines);
+    });
   }
 
   async function load() {
@@ -144,6 +203,7 @@ export function createTourState() {
 
     diffs.clear();
     windows.clear();
+    highlights.clear();
     problems.value = [];
     key = nextKey;
     tip.value = nextTip;
@@ -172,6 +232,7 @@ export function createTourState() {
       return;
     }
     located.value = content.located;
+    preferences.value = await readPreferences();
     let pending: ReturnType<typeof setTimeout> | undefined;
     await api.onTourChanged(() => {
       clearTimeout(pending);
@@ -207,6 +268,15 @@ export function createTourState() {
     missing,
     generation,
     tour,
+    highlights,
+    preferences,
+    setDiffView,
+    toggleDiffView,
+    toggleWrap,
+    query,
+    searched,
+    matching,
+    nextMatch,
     tip,
     stale,
     problems,

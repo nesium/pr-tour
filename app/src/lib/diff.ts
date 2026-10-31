@@ -157,3 +157,38 @@ export function expandUp(window: DiffWindow) {
 export function expandDown(window: DiffWindow, rows: Row[]) {
   window.hi = rowIndex(Math.min(rows.length - 1, window.hi + EXPAND_STEP));
 }
+
+/** One line of the split view: base on the left, head on the right. */
+export type SplitItem =
+  | { type: "pair"; key: string; left?: Row; right?: Row }
+  | Exclude<DiffItem, { type: "row" }>;
+
+/**
+ * Pairs a unified window for the split view. Within a change, the n-th removed
+ * line sits beside the n-th added one; unchanged lines sit beside themselves.
+ */
+export function splitItems(items: DiffItem[]): SplitItem[] {
+  const split: SplitItem[] = [];
+  let removed: Extract<DiffItem, { type: "row" }>[] = [];
+  let added: Extract<DiffItem, { type: "row" }>[] = [];
+  const flush = () => {
+    for (let i = 0; i < Math.max(removed.length, added.length); i++) {
+      split.push({ type: "pair", key: (removed[i] ?? added[i]).key, left: removed[i]?.row, right: added[i]?.row });
+    }
+    removed = [];
+    added = [];
+  };
+  for (const item of items) {
+    if (item.type === "row" && item.row.kind === "-") {
+      if (added.length) flush();
+      removed.push(item);
+    } else if (item.type === "row" && item.row.kind === "+") {
+      added.push(item);
+    } else {
+      flush();
+      split.push(item.type === "row" ? { type: "pair", key: item.key, left: item.row, right: item.row } : item);
+    }
+  }
+  flush();
+  return split;
+}

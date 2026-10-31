@@ -128,3 +128,8 @@ body {
   background: color-mix(in srgb, var(--done) 13%, transparent);
   color: var(--done);
 }
+
+::highlight(search) {
+  background: color-mix(in srgb, var(--gh-selected) 45%, transparent);
+  color: inherit;
+}

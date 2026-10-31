@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, inject } from "vue";
-import { expandDown, expandUp, inAnchor, windowItems } from "../lib/diff";
-import type { Anchor, AnchorKey } from "../lib/types";
+import { expandDown, expandUp, inAnchor, splitItems, windowItems, type Row } from "../lib/diff";
+import { highlightKey, type Anchor, type AnchorKey } from "../lib/types";
 import { TOUR } from "../lib/useTour";
+import CodeText from "./CodeText.vue";
+import SplitHalf from "./SplitHalf.vue";
 
 const props = defineProps<{ anchor: Anchor; anchorKey: AnchorKey }>();
 const tour = inject(TOUR)!;
@@ -16,6 +18,9 @@ const state = computed(() => tour.diffs.get(props.anchor.file));
 const ready = computed(() => (state.value?.status === "ready" ? state.value.diff : null));
 const diffWindow = computed(() => (ready.value ? tour.windowFor(props.anchorKey, ready.value.rows, props.anchor) : null));
 const view = computed(() => (ready.value && diffWindow.value ? windowItems(ready.value.rows, ready.value.hunks, diffWindow.value) : null));
+const split = computed(() => tour.preferences.value.diffView === "split");
+const pairs = computed(() => (split.value && view.value ? splitItems(view.value.items) : []));
+const wrapped = computed(() => split.value || tour.preferences.value.wrap);
 const topHeader = computed(() => {
   if (!ready.value || !diffWindow.value) return "";
   const { rows, hunks } = ready.value;
@@ -23,10 +28,20 @@ const topHeader = computed(() => {
   return firstChange ? hunks[firstChange.hunk!].header : "";
 });
 const canGrowDown = computed(() => Boolean(ready.value && diffWindow.value && diffWindow.value.hi < ready.value.rows.length - 1));
+
+const oldLines = computed(() => tour.highlights.get(highlightKey(props.anchor.file, "old")));
+const newLines = computed(() => tour.highlights.get(highlightKey(props.anchor.file, "new")));
+/** Removed lines take their colours from the file at base, the rest from the file at head. */
+const tokensOf = (row: Row) => (row.kind === "-" ? oldLines.value?.[row.old! - 1] : newLines.value?.[row.new! - 1]);
+const tone = (row?: Row) => ({ add: row?.kind === "+", del: row?.kind === "-", empty: !row });
+const hit = (row?: Row) => Boolean(row && inAnchor(row, props.anchor));
+/** In the split view, the left side shows base and the right side head. */
+const leftOf = (row?: Row) => (row?.kind === "+" ? undefined : row);
+const rightOf = (row?: Row) => (row?.kind === "-" ? undefined : row);
 </script>
 
 <template>
-  <section class="box">
+  <section class="box anchor-diff">
     <header class="file">
       <span class="name">{{ anchor.file }}</span>
       <span class="range">{{ range }}</span>
@@ -34,15 +49,19 @@ const canGrowDown = computed(() => Boolean(ready.value && diffWindow.value && di
     <div v-if="!state || state.status === 'loading'" class="note">Loading diff…</div>
     <div v-else-if="state.status === 'error'" class="note error">{{ state.message }}</div>
     <div v-else-if="!view || !diffWindow" class="note warning">This anchor doesn't match any change in the diff.</div>
-    <div v-else class="code">
+    <div v-else class="code" :class="{ wrapped, split }">
       <div class="lines">
         <div class="expander" :class="{ action: diffWindow.lo > 0 }" @click="diffWindow.lo > 0 && expandUp(diffWindow)">
           <span class="gutter">{{ diffWindow.lo > 0 ? "↑" : "" }}</span><span class="label">{{ topHeader }}</span>
         </div>
-        <template v-for="item in view.items" :key="item.key">
-          <div v-if="item.type === 'row'" class="row" :class="{ add: item.row.kind === '+', del: item.row.kind === '-', hit: inAnchor(item.row, anchor) }">
+        <template v-for="item in split ? pairs : view.items" :key="item.key">
+          <div v-if="item.type === 'pair'" class="pair">
+            <SplitHalf side="old" :row="leftOf(item.left)" :hit="anchor.side === 'old' && hit(leftOf(item.left))" :tokens="leftOf(item.left) && tokensOf(item.left!)" />
+            <SplitHalf side="new" :row="rightOf(item.right)" :hit="anchor.side !== 'old' && hit(rightOf(item.right))" :tokens="rightOf(item.right) && tokensOf(item.right!)" />
+          </div>
+          <div v-else-if="item.type === 'row'" class="row" :class="[tone(item.row), { hit: hit(item.row) }]">
             <span class="gutter"><span>{{ item.row.old ?? "" }}</span><span>{{ item.row.new ?? "" }}</span></span>
-            <span class="text"><span class="sign">{{ item.row.kind === " " ? " " : item.row.kind }}</span>{{ item.row.text }}</span>
+            <span class="text"><span class="sign">{{ item.row.kind === " " ? " " : item.row.kind }}</span><CodeText :text="item.row.text" :tokens="tokensOf(item.row)" /></span>
           </div>
           <div v-else-if="item.type === 'jump'" class="expander">
             <span class="gutter" /><span class="label">{{ item.header }}</span>
@@ -60,15 +79,16 @@ const canGrowDown = computed(() => Boolean(ready.value && diffWindow.value && di
   </section>
 </template>
 
-<style scoped>
-.box {
+<style>
+/* Not scoped: SplitHalf draws rows too. */
+.anchor-diff {
   border: 1px solid var(--gh-border);
   border-radius: 6px;
   overflow: hidden;
   background: var(--gh-canvas);
   color: var(--gh-fg);
 }
-.file {
+.anchor-diff .file {
   display: flex;
   gap: 10px;
   align-items: center;
@@ -79,7 +99,7 @@ const canGrowDown = computed(() => Boolean(ready.value && diffWindow.value && di
   font-family: var(--mono);
   font-size: 12px;
 }
-.name {
+.anchor-diff .name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -87,44 +107,59 @@ const canGrowDown = computed(() => Boolean(ready.value && diffWindow.value && di
   white-space: nowrap;
   font-weight: 600;
 }
-.range {
+.anchor-diff .range {
   flex: none;
   font-size: 11px;
   color: var(--gh-muted);
 }
-.note {
+.anchor-diff .note {
   padding: 10px 12px;
   color: var(--gh-muted);
   font-size: 12px;
 }
-.note.error {
+.anchor-diff .note.error {
   color: var(--gh-del-sign);
 }
-.note.warning {
+.anchor-diff .note.warning {
   color: var(--gh-selected);
 }
-.code {
+.anchor-diff .code {
   overflow-x: auto;
   font-family: var(--mono);
   font-size: 12px;
   line-height: 20px;
 }
-.lines {
+.anchor-diff .code.wrapped {
+  overflow-x: hidden;
+}
+.anchor-diff .lines {
   display: inline-block;
   min-width: 100%;
 }
-.row,
-.expander {
+.anchor-diff .wrapped .lines {
+  display: block;
+}
+.anchor-diff .row,
+.anchor-diff .expander {
   display: flex;
   min-width: 100%;
 }
-.gutter {
+.anchor-diff .pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.anchor-diff .half {
+  min-width: 0;
+}
+.anchor-diff .half + .half {
+  border-left: 1px solid var(--gh-border);
+}
+.anchor-diff .gutter {
   position: sticky;
   left: 0;
   flex: none;
   display: flex;
   justify-content: flex-end;
-  gap: 0;
   width: 91px;
   padding-right: 8px;
   border-left: 3px solid transparent;
@@ -132,63 +167,79 @@ const canGrowDown = computed(() => Boolean(ready.value && diffWindow.value && di
   background: var(--gh-canvas);
   user-select: none;
 }
-.gutter > span {
+.anchor-diff .gutter.single {
+  width: 54px;
+}
+.anchor-diff .gutter > span {
   width: 40px;
   text-align: right;
 }
-.text {
+.anchor-diff .text {
   flex: 1;
+  min-width: 0;
   padding: 0 10px 0 8px;
   white-space: pre;
   tab-size: 4;
 }
-.sign {
+.anchor-diff .wrapped .text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding-left: calc(8px + 1.5ch);
+  text-indent: -1.5ch;
+}
+.anchor-diff .sign {
   display: inline-block;
   width: 1.5ch;
+  text-indent: 0;
   user-select: none;
 }
-.row.add {
+.anchor-diff .row.add {
   background: var(--gh-add-line);
 }
-.row.add .gutter {
+.anchor-diff .row.add .gutter {
   background: linear-gradient(var(--gh-add-num), var(--gh-add-num)), var(--gh-canvas);
 }
-.row.add .sign {
+.anchor-diff .row.add .sign {
   color: var(--gh-add-sign);
 }
-.row.del {
+.anchor-diff .row.del {
   background: var(--gh-del-line);
 }
-.row.del .gutter {
+.anchor-diff .row.del .gutter {
   background: linear-gradient(var(--gh-del-num), var(--gh-del-num)), var(--gh-canvas);
 }
-.row.del .sign {
+.anchor-diff .row.del .sign {
   color: var(--gh-del-sign);
 }
-.row.hit .gutter {
+.anchor-diff .row.empty {
+  background: color-mix(in srgb, var(--gh-border) 25%, transparent);
+}
+.anchor-diff .row.hit .gutter {
   border-left-color: var(--gh-selected);
 }
-.expander {
+.anchor-diff .expander {
   height: 28px;
   align-items: center;
   background: var(--gh-hunk-line);
   color: var(--gh-muted);
 }
-.expander .gutter {
+.anchor-diff .expander .gutter {
   justify-content: center;
   align-self: stretch;
   align-items: center;
   padding: 0;
   background: linear-gradient(var(--gh-hunk-num), var(--gh-hunk-num)), var(--gh-canvas);
 }
-.expander .label {
+.anchor-diff .expander .label {
   padding: 0 10px;
   white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.expander.action {
+.anchor-diff .expander.action {
   cursor: pointer;
 }
-.expander.action:hover {
+.anchor-diff .expander.action:hover {
   opacity: 0.8;
 }
 </style>
