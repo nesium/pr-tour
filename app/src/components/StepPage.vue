@@ -26,7 +26,13 @@ const done = computed(() => Boolean(tour.progress.value.done[props.step.id]));
       <MarkdownText :text="step.check" />
     </div>
     <StepNotes :step="step" />
-    <AnchorDiff v-for="(anchor, i) in step.anchors" :key="anchorKey(step.id, i)" :anchor="anchor" :anchor-key="anchorKey(step.id, i)" />
+    <AnchorDiff
+      v-for="(anchor, i) in step.anchors"
+      :key="anchorKey(step.id, i)"
+      :anchor="anchor"
+      :anchor-key="anchorKey(step.id, i)"
+      :step="step.id"
+    />
   </article>
 </template>
 

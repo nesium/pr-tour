@@ -135,11 +135,12 @@ the tour's `skipped` entries with their reasons and the files they match.
 
 ### Notes for the author
 
-Under each step's explanation, add **notes**: a **change** the author should
-make, or a **remark** that needs no change. A note is on the step, or on lines:
-click a line number in the step's diff to pick it, shift-click to pick a range,
-click again to clear. Lines with an open note are marked in the diff, and the
-sidebar counts each step's open change requests.
+Add **notes** for the author: a **change** they should make, or a **remark**
+that needs no change. For a note on lines, click a line number in the step's
+diff (shift-click for a range, click again to clear): the note box opens right
+below those lines, and the note stays there in the diff. Notes on the whole
+step go in the box under the step's explanation, which also lists all of the
+step's notes. The sidebar counts each step's open change requests.
 
 **Copy for the author** (`c`) puts the open notes on the clipboard as a prompt
 for the author's Claude Code session: change requests numbered, each with its

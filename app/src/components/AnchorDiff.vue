@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, inject } from "vue";
 import { inAnchor, type Row } from "../lib/diff";
-import type { Anchor, AnchorKey, Side } from "../lib/types";
+import type { Anchor, AnchorKey, Side, StepId } from "../lib/types";
 import { TOUR } from "../lib/useTour";
 import DiffBody from "./DiffBody.vue";
 
-const props = defineProps<{ anchor: Anchor; anchorKey: AnchorKey }>();
+/** With `step`, lines can be picked for notes on it, right in the diff. */
+const props = defineProps<{ anchor: Anchor; anchorKey: AnchorKey; step?: StepId }>();
 const tour = inject(TOUR)!;
 
 const range = computed(() => {
@@ -24,12 +25,12 @@ const hit = (row: Row, side: Side) => (props.anchor.side ?? "new") === side && i
     <header class="file">
       <span class="name">{{ anchor.file }}</span>
       <span class="range">{{ range }}</span>
-      <button class="open" title="Open the whole file's diff in a tab" @click="tour.openTab(anchor.file)">Whole file ↗</button>
+      <button class="open-file" title="Open the whole file's diff in a tab" @click="tour.openTab(anchor.file)">Whole file ↗</button>
     </header>
     <div v-if="!state || state.status === 'loading'" class="note">Loading diff…</div>
     <div v-else-if="state.status === 'error'" class="note error">{{ state.message }}</div>
     <div v-else-if="!ready || !diffWindow" class="note warning">This anchor doesn't match any change in the diff.</div>
-    <DiffBody v-else :file="anchor.file" :diff="ready" :window="diffWindow" :hit="hit" pickable />
+    <DiffBody v-else :file="anchor.file" :diff="ready" :window="diffWindow" :hit="hit" :step="step" :place="anchorKey" />
   </section>
 </template>
 
@@ -61,7 +62,7 @@ const hit = (row: Row, side: Side) => (props.anchor.side ?? "new") === side && i
   white-space: nowrap;
   font-weight: 600;
 }
-.diff-box .open {
+.diff-box .open-file {
   flex: none;
   height: 22px;
   padding: 0 8px;
@@ -73,7 +74,7 @@ const hit = (row: Row, side: Side) => (props.anchor.side ?? "new") === side && i
   font-size: 11px;
   cursor: pointer;
 }
-.diff-box .open:hover {
+.diff-box .open-file:hover {
   color: var(--gh-fg);
 }
 .diff-box .range {
@@ -190,6 +191,27 @@ const hit = (row: Row, side: Side) => (props.anchor.side ?? "new") === side && i
 .diff-box .pickable .gutter span:hover,
 .diff-box .pickable .gutter.single:hover {
   color: var(--gh-fg);
+}
+/* Container units let an inline note span the visible width while long lines scroll sideways. */
+.diff-box .code {
+  container-type: inline-size;
+}
+.diff-box .inline-row {
+  position: sticky;
+  left: 0;
+  width: 100cqw;
+  /* Prose, not code: undo the code area's font, line height and no-wrap. */
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: normal;
+  padding: 8px 12px;
+  border-top: 1px solid var(--gh-border);
+  border-bottom: 1px solid var(--gh-border);
+  background: var(--gh-header);
+}
+.diff-box .inline-row.composer {
+  padding: 0;
 }
 .diff-box .row.picked {
   background: color-mix(in srgb, var(--gh-selected) 22%, var(--gh-canvas));

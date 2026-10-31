@@ -39,7 +39,7 @@ const skipped = computed(() => {
         <span class="name">{{ entry.file }}</span>
         <DiffSize v-if="entry.added !== null && entry.removed !== null" :added="entry.added" :removed="entry.removed" />
         <span v-else class="range">binary</span>
-        <button class="open" title="Open the whole file's diff in a tab" @click="tour.openTab(entry.file)">Whole file ↗</button>
+        <button class="open-file" title="Open the whole file's diff in a tab" @click="tour.openTab(entry.file)">Whole file ↗</button>
       </header>
       <div v-if="failed(entry.file)" class="note error">{{ failed(entry.file) }}</div>
       <div v-else-if="entry.added === null" class="note">A binary file: no lines to show.</div>

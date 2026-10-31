@@ -59,6 +59,8 @@ export function createTourState() {
   const review = shallowRef<Review>({ version: 1, notes: [] });
   /** Lines picked in a diff for the next note; shift-click extends them. */
   const noteTarget = ref<NoteLines | null>(null);
+  /** The diff box the lines were picked in, so the note box opens only there. */
+  const notePlace = ref<AnchorKey | null>(null);
   const reviewError = ref<string | null>(null);
   const askError = ref<string | null>(null);
   const sending = ref(false);
@@ -149,20 +151,21 @@ export function createTourState() {
     }
   }
 
-  async function addNote(step: StepId, kind: NoteKind, text: string): Promise<boolean> {
+  async function addNote(step: StepId, kind: NoteKind, text: string, lines: NoteLines | null): Promise<boolean> {
     const reviewed = tour.value;
     if (!reviewed || !text.trim()) return false;
-    const added = await changeReview({ op: "add", step, head_sha: reviewed.head_sha, kind, text, lines: noteTarget.value });
-    if (added) noteTarget.value = null;
+    const added = await changeReview({ op: "add", step, head_sha: reviewed.head_sha, kind, text, lines });
+    if (added && lines) noteTarget.value = null;
     return added;
   }
 
   const resolveNote = (id: NoteId, resolved: boolean) => changeReview({ op: "resolve", id, resolved });
   const deleteNote = (id: NoteId) => changeReview({ op: "delete", id });
 
-  /** Picks lines for the next note; `extend` grows the pick within the same file and side. */
-  function pickLine(file: RepoFile, side: Side, line: LineNumber, extend: boolean) {
-    const picked = noteTarget.value;
+  /** Picks lines for the next note in the box at `place`; `extend` grows the pick within the same file and side. */
+  function pickLine(place: AnchorKey, file: RepoFile, side: Side, line: LineNumber, extend: boolean) {
+    const picked = notePlace.value === place ? noteTarget.value : null;
+    notePlace.value = place;
     if (extend && picked && picked.file === file && picked.side === side) {
       const start = Math.min(picked.start, picked.end, line) as LineNumber;
       const end = Math.max(picked.start, picked.end, line) as LineNumber;
@@ -499,6 +502,7 @@ export function createTourState() {
     openNotes,
     notesOf,
     noteTarget,
+    notePlace,
     pickLine,
     addNote,
     resolveNote,

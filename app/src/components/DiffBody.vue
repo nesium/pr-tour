@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, inject } from "vue";
 import { expandDown, expandUp, splitItems, windowItems, type DiffWindow, type ParsedDiff, type Row } from "../lib/diff";
-import { highlightKey, type RepoFile, type Side } from "../lib/types";
+import { highlightKey, type AnchorKey, type NoteLines, type RepoFile, type Side, type StepId } from "../lib/types";
+import type { DiffItem, SplitItem } from "../lib/diff";
 import { TOUR } from "../lib/useTour";
 import CodeText from "./CodeText.vue";
+import NoteCard from "./NoteCard.vue";
+import NoteComposer from "./NoteComposer.vue";
 import SplitHalf from "./SplitHalf.vue";
 
 /** A file whole: no expanders, folds at the edges too, and a higher row limit. */
@@ -18,9 +21,11 @@ const props = defineProps<{
   whole?: boolean;
   /** With `whole`: show every line instead of folding long unchanged runs. */
   unfolded?: boolean;
-  /** Line numbers can be clicked to pick lines for a note. */
-  pickable?: boolean;
+  /** With both: line numbers pick lines for a note on `step`, written and shown right in the diff. */
+  step?: StepId;
+  place?: AnchorKey;
 }>();
+const pickable = computed(() => Boolean(props.step && props.place));
 const tour = inject(TOUR)!;
 
 const view = computed(() =>
@@ -50,15 +55,34 @@ const within = (row: Row, side: Side, lines: { file: RepoFile; side: Side; start
   const n = lineOn(row, side);
   return lines.file === props.file && lines.side === side && n !== undefined && n >= lines.start && n <= lines.end;
 };
-const picked = (row: Row, side: Side) => Boolean(tour.noteTarget.value && within(row, side, tour.noteTarget.value));
+/** The lines picked in this box, if any. */
+const target = computed(() => (pickable.value && tour.notePlace.value === props.place ? tour.noteTarget.value : null));
+const picked = (row: Row, side: Side) => Boolean(target.value && within(row, side, target.value));
 /** Open notes on this commit mark their lines; an older note's lines may have moved. */
 const noted = (row: Row, side: Side) =>
   tour.openNotes.value.some((n) => n.lines && n.head_sha === tour.tour.value?.head_sha && within(row, side, n.lines));
 
 function pick(event: MouseEvent, row: Row, side: Side) {
   const line = lineOn(row, side);
-  if (props.pickable && line !== undefined) tour.pickLine(props.file, side, line, event.shiftKey);
+  if (pickable.value && line !== undefined) tour.pickLine(props.place!, props.file, side, line, event.shiftKey);
 }
+
+/** This step's open notes on this commit, each shown under its last line. */
+const lineNotes = computed(() =>
+  pickable.value
+    ? tour.openNotes.value.filter((n) => n.step === props.step && n.lines?.file === props.file && n.head_sha === tour.tour.value?.head_sha)
+    : [],
+);
+const endsAt = (row: Row | undefined, side: Side, lines: NoteLines) => Boolean(row && lines.side === side && lineOn(row, side) === lines.end);
+/** The rows an item shows on each side: a unified row on both, a split pair on its own. */
+const sidesOf = (item: DiffItem | SplitItem): [Row | undefined, Row | undefined] =>
+  item.type === "row" ? [item.row, item.row] : item.type === "pair" ? [leftOf(item.left), rightOf(item.right)] : [undefined, undefined];
+const endsHere = (item: DiffItem | SplitItem, lines: NoteLines) => {
+  const [old, next] = sidesOf(item);
+  return endsAt(old, "old", lines) || endsAt(next, "new", lines);
+};
+const notesAfter = (item: DiffItem | SplitItem) => lineNotes.value.filter((n) => endsHere(item, n.lines!));
+const composerAfter = (item: DiffItem | SplitItem) => Boolean(target.value && endsHere(item, target.value));
 /** In the split view, the left side shows base and the right side head. */
 const leftOf = (row?: Row) => (row?.kind === "+" ? undefined : row);
 const rightOf = (row?: Row) => (row?.kind === "-" ? undefined : row);
@@ -115,6 +139,14 @@ const rightOf = (row?: Row) => (row?.kind === "-" ? undefined : row);
         <div v-else class="expander action" @click="window.open.add(item.start)">
           <span class="gutter">↕</span><span class="label">{{ item.count }} unchanged lines</span>
         </div>
+        <template v-if="pickable && (item.type === 'row' || item.type === 'pair')">
+          <div v-for="note in notesAfter(item)" :key="note.id" class="inline-row">
+            <NoteCard :note="note" inline />
+          </div>
+          <div v-if="composerAfter(item)" class="inline-row composer">
+            <NoteComposer :step="step!" :lines="target" inline @cancel="tour.noteTarget.value = null" />
+          </div>
+        </template>
       </template>
       <div v-if="view.truncated" class="note">… showing the first {{ view.items.length }} lines</div>
       <div v-if="canGrowDown" class="expander action" @click="expandDown(window, diff.rows)">
