@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, inject } from "vue";
-import { api } from "../lib/api";
 import { inAnchor, type Row } from "../lib/diff";
 import type { Anchor, AnchorKey, Side } from "../lib/types";
 import { TOUR } from "../lib/useTour";
@@ -25,7 +24,7 @@ const hit = (row: Row, side: Side) => (props.anchor.side ?? "new") === side && i
     <header class="file">
       <span class="name">{{ anchor.file }}</span>
       <span class="range">{{ range }}</span>
-      <button class="open" title="Open the whole file's diff in a new window" @click="api.openFile(anchor.file)">Whole file ↗</button>
+      <button class="open" title="Open the whole file's diff in a tab" @click="tour.openTab(anchor.file)">Whole file ↗</button>
     </header>
     <div v-if="!state || state.status === 'loading'" class="note">Loading diff…</div>
     <div v-else-if="state.status === 'error'" class="note error">{{ state.message }}</div>

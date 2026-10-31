@@ -58,6 +58,9 @@ const fileLabel = (step: Step) => {
   <nav class="sidebar" :style="{ width: `${width}px` }">
     <div class="resize" :class="{ active: dragging !== null }" title="Drag to resize" @pointerdown.prevent="startResize" @dblclick="tour.setSidebarWidth(DEFAULT_PREFERENCES.sidebarWidth)" />
     <div class="search">
+      <button class="filter" :class="{ on: tour.closelyOnly.value }" title="Show only the steps to read closely (f)" @click="tour.toggleFilter()">
+        {{ tour.closelyOnly.value ? "● Read closely only" : "○ Read closely only" }}
+      </button>
       <input ref="search" v-model="tour.query.value" type="search" placeholder="Search the tour" spellcheck="false" @keydown="onSearchKey" />
       <span v-if="matchCount !== null" class="count">{{ matchCount ? `${matchCount} match${matchCount === 1 ? "" : "es"} · ⏎ next` : "No matches" }}</span>
     </div>
@@ -80,6 +83,10 @@ const fileLabel = (step: Step) => {
     </template>
     <button v-if="shown('concerns')" class="entry" :class="{ current: tour.current.value?.id === 'concerns' }" @click="tour.go('concerns')">
       <span class="left blocked">!</span><span class="label strong">Open concerns ({{ props.concernCount }})</span>
+    </button>
+    <button v-if="shown('uncovered')" class="entry" :class="{ current: tour.current.value?.id === 'uncovered' }" @click="tour.go('uncovered')">
+      <span class="left dim">○</span>
+      <span class="label strong">Not in the tour<template v-if="tour.uncovered.value"> ({{ tour.uncovered.value.length }})</template></span>
     </button>
   </nav>
 </template>
@@ -127,6 +134,20 @@ const fileLabel = (step: Step) => {
 }
 .search input:focus {
   border-color: var(--accent);
+}
+.filter {
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.filter.on {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .count {
   padding-left: 2px;

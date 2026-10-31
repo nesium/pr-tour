@@ -4,6 +4,7 @@ mod git;
 mod hunks;
 mod launch_lock;
 mod locate;
+mod stat;
 mod types;
 pub mod validate;
 mod windows;
@@ -49,11 +50,11 @@ pub fn run(args: Vec<String>, starting: LaunchLock) {
             commands::start_generation,
             commands::cancel_generation,
             commands::open_repo,
-            commands::open_file,
             commands::read_tour,
             commands::validate_tour,
             commands::branch_tip,
             commands::file_diff,
+            commands::diff_stat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the PR tour app");

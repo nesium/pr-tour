@@ -4,6 +4,7 @@
 
 use crate::types::{BranchName, CommitId, RepoFile, RepoRoot, TourPath};
 use crate::windows::{self, GenerationState, OpenRequest, WindowContent, WindowLabel, Windows};
+use crate::stat::{self, FileStat};
 use crate::{git, validate};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -82,14 +83,16 @@ pub fn cancel_generation(app: AppHandle, window: Window) {
     windows::cancel_generation(&app, &WindowLabel::of(&window));
 }
 
-/// Opens one file of this window's tour in a window of its own.
-#[tauri::command]
-pub fn open_file(app: AppHandle, window: Window, file: RepoFile) -> Result<(), String> {
-    windows::open_file(&app, &WindowLabel::of(&window), file)
-}
-
 /// Opens the tour of the branch checked out in `repo`, chosen in the start window.
 #[tauri::command]
 pub async fn open_repo(app: AppHandle, repo: PathBuf) -> Result<(), String> {
     windows::open(&app, OpenRequest { repo, branch: None, tour: None, generate: false }).await
+}
+
+/// Every file the tour's commits change, with its size. Renames count as a
+/// removal and an addition, as the tour's per-file diffs show them.
+#[tauri::command]
+pub async fn diff_stat(root: RepoRoot, base: CommitId, head: CommitId) -> Result<Vec<FileStat>, String> {
+    let args = ["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", base.as_str(), head.as_str()];
+    Ok(stat::parse_numstat(&git::text(root.as_path(), &args).await?))
 }

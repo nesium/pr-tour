@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref } from "vue";
 import ConcernsPage from "./components/ConcernsPage.vue";
+import DiffSize from "./components/DiffSize.vue";
 import FileView from "./components/FileView.vue";
 import NoTour from "./components/NoTour.vue";
 import OverviewPage from "./components/OverviewPage.vue";
 import StepPage from "./components/StepPage.vue";
+import TabBar from "./components/TabBar.vue";
 import TourSidebar from "./components/TourSidebar.vue";
+import UncoveredPage from "./components/UncoveredPage.vue";
 import { shortCommit } from "./lib/types";
 import { useSearchHighlight } from "./lib/useSearchHighlight";
 import { createTourState, TOUR } from "./lib/useTour";
@@ -27,25 +30,39 @@ const reviewedCount = computed(() => loaded.value?.steps.filter((s) => tour.prog
 const currentStep = computed(() => (tour.current.value && "step" in tour.current.value ? tour.current.value.step : null));
 const THEME_LABELS = { system: "◐ System", light: "☀ Light", dark: "☾ Dark" } as const;
 const themeLabel = computed(() => THEME_LABELS[tour.preferences.value.theme]);
+/** The branch's size; binary files count as changed but add no lines. */
+const size = computed(() => {
+  const files = tour.stat.value;
+  if (!files) return null;
+  const sum = (key: "added" | "removed") => files.reduce((total, f) => total + (f[key] ?? 0), 0);
+  return { files: files.length, added: sum("added"), removed: sum("removed") };
+});
 const currentDone = computed(() => Boolean(currentStep.value && tour.progress.value.done[currentStep.value.id]));
 
 function onKey(event: KeyboardEvent) {
   if (!loaded.value) return;
-  if ((event.metaKey || event.ctrlKey) && event.key === "f") {
+  const onTourTab = !tour.activeTab.value;
+  if ((event.metaKey || event.ctrlKey) && event.key === "f" && onTourTab) {
     event.preventDefault();
     sidebar.value?.focusSearch();
     return;
   }
+  // ⌘⇧[ and ⌘⇧], as in browsers; with Shift held, the keys arrive as { and }.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && (event.key === "{" || event.key === "}")) {
+    event.preventDefault();
+    tour.moveTab(event.key === "}" ? 1 : -1);
+    return;
+  }
   const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
   if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
-  const viewing: Record<string, () => void> = {
+  const anyTab: Record<string, () => void> = {
     s: () => tour.toggleDiffView(),
     w: () => tour.toggleWrap(),
     t: () => tour.cycleTheme(),
   };
-  // A file window only changes how its diff looks.
-  const actions: Record<string, () => void> = tour.focusFile.value ? viewing : {
-    ...viewing,
+  // Moving through the tour belongs to the Tour tab; a file tab only changes how its diff looks.
+  const actions: Record<string, () => void> = !onTourTab ? anyTab : {
+    ...anyTab,
     j: () => tour.move(1),
     ArrowDown: () => tour.move(1),
     k: () => tour.move(-1),
@@ -72,15 +89,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 
 <template>
   <NoTour v-if="!loaded" />
-  <FileView v-else-if="tour.focusFile.value" :file="tour.focusFile.value" />
   <div v-else class="app">
     <header class="top">
       <div class="bar">
         <span class="strong">Tour</span>
         <span class="branches muted">{{ loaded.branch }} → {{ loaded.base }}</span>
         <span class="small dim">{{ shortCommit(loaded.base_sha) }}..{{ shortCommit(loaded.head_sha) }}</span>
+        <DiffSize v-if="size" :files="size.files" :added="size.added" :removed="size.removed" />
         <span class="spacer" />
-        <span class="small muted">{{ reviewedCount }}/{{ loaded.steps.length }} reviewed</span>
         <div class="segmented">
           <button :class="{ on: tour.preferences.value.diffView === 'unified' }" @click="tour.setDiffView('unified')">Unified</button>
           <button :class="{ on: tour.preferences.value.diffView === 'split' }" @click="tour.setDiffView('split')">Split</button>
@@ -95,9 +111,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
           Wrap
         </button>
         <button class="filter" title="Theme: system, light or dark (t)" @click="tour.cycleTheme()">{{ themeLabel }}</button>
-        <button class="filter" :class="{ on: tour.closelyOnly.value }" @click="tour.toggleFilter()">
-          {{ tour.closelyOnly.value ? "● Read closely only" : "○ Read closely only" }}
-        </button>
       </div>
       <div v-if="tour.stale.value" class="banner">
         This tour is for {{ shortCommit(loaded.head_sha) }}; the branch is now at {{ shortCommit(tour.tip.value) }}. Line notes may be off.
@@ -107,22 +120,33 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <div v-for="problem in tour.problems.value" :key="problem" class="problem">{{ problem }}</div>
       </details>
     </header>
-    <div class="main">
-      <TourSidebar ref="sidebar" :concern-count="loaded.concerns.length" @next-match="nextMatch" />
-      <main :key="tour.current.value?.id" ref="detail" class="detail">
-        <OverviewPage v-if="tour.current.value?.id === 'overview'" :tour="loaded" />
-        <ConcernsPage v-else-if="tour.current.value?.id === 'concerns'" :concerns="loaded.concerns" />
-        <StepPage v-else-if="currentStep" :step="currentStep" />
-      </main>
+    <TabBar />
+    <!-- The Tour tab stays mounted under a file tab, so coming back keeps its place. -->
+    <div v-show="!tour.activeTab.value" class="tab-body">
+      <div class="main">
+        <TourSidebar ref="sidebar" :concern-count="loaded.concerns.length" @next-match="nextMatch" />
+        <main :key="tour.current.value?.id" ref="detail" class="detail">
+          <OverviewPage v-if="tour.current.value?.id === 'overview'" :tour="loaded" />
+          <ConcernsPage v-else-if="tour.current.value?.id === 'concerns'" :concerns="loaded.concerns" />
+          <UncoveredPage v-else-if="tour.current.value?.id === 'uncovered'" />
+          <StepPage v-else-if="currentStep" :step="currentStep" />
+        </main>
+      </div>
+      <footer class="bottom">
+        <button class="button" @click="tour.move(-1)">← Prev</button>
+        <button class="button" @click="tour.move(1)">Next →</button>
+        <span class="small muted">{{ reviewedCount }}/{{ loaded.steps.length }} reviewed</span>
+        <span class="spacer small dim">j/k move · space reviewed + next · f filter · s split · w wrap · t theme · / search · ⌘⇧[ ] tabs</span>
+        <button v-if="currentStep" class="button" :class="{ primary: !currentDone }" @click="tour.toggleDone(currentStep.id)">
+          {{ currentDone ? "✓ Reviewed" : "Mark reviewed" }}
+        </button>
+      </footer>
     </div>
-    <footer class="bottom">
-      <button class="button" @click="tour.move(-1)">← Prev</button>
-      <button class="button" @click="tour.move(1)">Next →</button>
-      <span class="spacer small dim">j/k move · space reviewed + next · f filter · s split · w wrap · t theme · / search</span>
-      <button v-if="currentStep" class="button" :class="{ primary: !currentDone }" @click="tour.toggleDone(currentStep.id)">
-        {{ currentDone ? "✓ Reviewed" : "Mark reviewed" }}
-      </button>
-    </footer>
+    <div v-if="tour.activeTab.value" class="tab-body">
+      <KeepAlive :max="12">
+        <FileView :key="tour.activeTab.value" :file="tour.activeTab.value" />
+      </KeepAlive>
+    </div>
   </div>
 </template>
 
@@ -203,6 +227,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 .problem {
   padding: 2px 0 2px 12px;
   font-family: var(--mono);
+}
+.tab-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .main {
   flex: 1;

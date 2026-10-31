@@ -1,5 +1,6 @@
 import { computed, reactive, ref, shallowReactive, shallowRef, watch, type InjectionKey } from "vue";
-import { api, type FileDiff, type GenerationState, type Located } from "./api";
+import { api, type FileDiff, type FileStat, type GenerationState, type Located } from "./api";
+import { anchorsIn, uncoveredHunks } from "./coverage";
 import { anchorWindow, parseFile, type DiffWindow, type ParsedDiff, type Row } from "./diff";
 import type { HighlightedLines } from "./highlight";
 import { highlightFile } from "./highlighter";
@@ -8,7 +9,7 @@ import { progressKey, readProgress, writeProgress } from "./progress";
 import { entryMatches, searchQuery, type CodeOf } from "./search";
 import { applyTheme, type ThemeChoice } from "./theme";
 import { anchoredFiles, entries, filesOf, isStep, parseTour } from "./tour";
-import { highlightKey, type Anchor, type AnchorKey, type CommitId, type EntryId, type HighlightKey, type Progress, type ProgressKey, type RepoFile, type Side, type Tour } from "./types";
+import { highlightKey, type Anchor, type AnchorKey, type CommitId, type EntryId, type HighlightKey, type HunkIndex, type Progress, type ProgressKey, type RepoFile, type Side, type StepId, type Tour } from "./types";
 
 /** git processes reading diffs at once. More stay queued, current page first. */
 const PARALLEL_DIFFS = 8;
@@ -28,8 +29,11 @@ export function createTourState() {
   const missing = ref(false);
   const generation = ref<GenerationState>({ running: false, lines: [], failure: null });
   const located = shallowRef<Located | null>(null);
-  /** Set in a file window: it shows this one file of the tour, whole. */
-  const focusFile = ref<RepoFile | null>(null);
+  /** Every file the tour's commits change, with its size; null until read. */
+  const stat = shallowRef<FileStat[] | null>(null);
+  /** Files open as tabs beside the tour, and the one shown; null shows the tour. */
+  const tabs = ref<RepoFile[]>([]);
+  const activeTab = ref<RepoFile | null>(null);
   // Tours never change in place: a new file means a new object, so nothing inside needs tracking.
   const tour = shallowRef<Tour | null>(null);
   const tip = ref<CommitId | null>(null);
@@ -100,7 +104,27 @@ export function createTourState() {
   }
 
   function go(id: EntryId) {
+    activeTab.value = null;
     setProgress({ current: id });
+  }
+
+  function openTab(file: RepoFile) {
+    if (!tabs.value.includes(file)) tabs.value = [...tabs.value, file];
+    activeTab.value = file;
+    request([file], true);
+  }
+
+  function closeTab(file: RepoFile) {
+    const at = tabs.value.indexOf(file);
+    tabs.value = tabs.value.filter((f) => f !== file);
+    if (activeTab.value === file) activeTab.value = tabs.value[Math.min(at, tabs.value.length - 1)] ?? null;
+  }
+
+  /** Steps the tour by one tab, the tour itself being the first. */
+  function moveTab(delta: number) {
+    const all = [null, ...tabs.value];
+    const at = all.indexOf(activeTab.value);
+    activeTab.value = all[(at + delta + all.length) % all.length];
   }
 
   function move(delta: number) {
@@ -110,7 +134,7 @@ export function createTourState() {
   }
 
   function toggleDone(id: EntryId) {
-    if (id === "overview" || id === "concerns") return;
+    if (!isStepId(id)) return;
     const done = { ...progress.value.done };
     if (done[id]) delete done[id];
     else done[id] = true;
@@ -132,6 +156,37 @@ export function createTourState() {
     }
     return window;
   }
+
+  /** A window over one whole hunk, for the uncovered page. */
+  function hunkWindowFor(key: AnchorKey, rows: Row[], hunk: HunkIndex): DiffWindow | null {
+    let window = windows.get(key);
+    if (!window) {
+      const first = rows.findIndex((r) => r.hunk === hunk);
+      if (first < 0) return null;
+      const last = rows.findLastIndex((r) => r.hunk === hunk);
+      window = reactive({ lo: first, hi: last, open: new Set() } as DiffWindow);
+      windows.set(key, window);
+    }
+    return window;
+  }
+
+  /**
+   * The changes no step or concern points at: whole files the tour never
+   * mentions, and hunks of mentioned files no anchor overlaps. A mentioned
+   * file only shows up once its diff has loaded.
+   */
+  const uncovered = computed(() => {
+    const reviewed = tour.value;
+    if (!reviewed || !stat.value) return null;
+    return stat.value.flatMap((entry) => {
+      const anchors = anchorsIn(reviewed, entry.file);
+      const state = diffs.get(entry.file);
+      if (anchors.length === 0) return [{ ...entry, hunks: state?.status === "ready" ? state.diff.hunks.map((_, i) => i as HunkIndex) : null }];
+      if (state?.status !== "ready") return [];
+      const hunks = uncoveredHunks(state.diff.hunks, anchors);
+      return hunks.length ? [{ ...entry, hunks }] : [];
+    });
+  });
 
   /** Queues diffs to read; `urgent` ones jump ahead of everything queued. */
   function request(files: RepoFile[], urgent: boolean) {
@@ -211,6 +266,7 @@ export function createTourState() {
     diffs.clear();
     windows.clear();
     highlights.clear();
+    stat.value = null;
     problems.value = [];
     key = nextKey;
     tip.value = nextTip;
@@ -218,12 +274,14 @@ export function createTourState() {
     tour.value = next;
     if (!list.value.some((e) => e.id === progress.value.current)) go(list.value[0].id);
 
-    if (focusFile.value) {
-      request([focusFile.value], true);
-      return;
-    }
-    request(current.value ? filesOf(next, current.value) : [], true);
+    request([...(current.value ? filesOf(next, current.value) : []), ...tabs.value], true);
     request(anchoredFiles(next), false);
+    void api.diffStat(at.root, next.base_sha, next.head_sha).then(
+      (found) => {
+        if (loading === loadNumber) stat.value = found;
+      },
+      () => {},
+    );
     void api.validateTour(at.root, at.path).then((found) => {
       if (loading === loadNumber) problems.value = found;
     });
@@ -254,7 +312,6 @@ export function createTourState() {
       return;
     }
     located.value = content.located;
-    if (content.kind === "file") focusFile.value = content.file;
     let pending: ReturnType<typeof setTimeout> | undefined;
     await api.onTourChanged(() => {
       clearTimeout(pending);
@@ -279,9 +336,14 @@ export function createTourState() {
     void api.startGeneration().catch((e) => (generation.value = { running: false, lines: [], failure: String(e) }));
   }
 
-  watch(current, (entry) => {
-    if (entry && tour.value && !focusFile.value) request(filesOf(tour.value, entry), true);
+  watch([current, stat], ([entry]) => {
+    if (!entry || !tour.value) return;
+    if (entry.id === "uncovered") request(uncoveredFiles(), true);
+    else request(filesOf(tour.value, entry), true);
   });
+
+  /** The files the uncovered page shows whole, which nothing else loads. */
+  const uncoveredFiles = () => (stat.value ?? []).map((s) => s.file).filter((f) => tour.value && anchorsIn(tour.value, f).length === 0);
 
   return {
     status,
@@ -290,7 +352,14 @@ export function createTourState() {
     missing,
     generation,
     tour,
-    focusFile,
+    stat,
+    uncovered,
+    hunkWindowFor,
+    tabs,
+    activeTab,
+    openTab,
+    closeTab,
+    moveTab,
     highlights,
     preferences,
     setDiffView,
@@ -323,6 +392,8 @@ export function createTourState() {
     windowFor,
   };
 }
+
+const isStepId = (id: EntryId): id is StepId => id !== "overview" && id !== "concerns" && id !== "uncovered";
 
 function toDiffState(file: FileDiff): DiffState {
   if ("Err" in file.diff) return { status: "error", message: file.diff.Err };

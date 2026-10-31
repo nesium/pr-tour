@@ -25,5 +25,6 @@ function textsOf(tour: Tour, entry: Entry, codeOf: CodeOf): string[] {
   if (entry.id === "overview") {
     return [tour.intent, ...tour.reading_order.flatMap((r) => [r.file, r.why])];
   }
+  if (entry.id === "uncovered") return [];
   return tour.concerns.flatMap((c) => [c.text, ...(c.anchor ? anchored(c.anchor) : [])]);
 }

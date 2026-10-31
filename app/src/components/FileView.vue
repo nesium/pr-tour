@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, inject, reactive, ref } from "vue";
 import { inAnchor, wholeFileWindow, type Row } from "../lib/diff";
-import { shortCommit, type Anchor, type RepoFile, type Side } from "../lib/types";
+import { anchorsIn } from "../lib/coverage";
+import type { Anchor, RepoFile, Side } from "../lib/types";
 import { TOUR } from "../lib/useTour";
 import DiffBody from "./DiffBody.vue";
+import DiffSize from "./DiffSize.vue";
 
 const props = defineProps<{ file: RepoFile }>();
 const tour = inject(TOUR)!;
@@ -15,10 +17,7 @@ const ready = computed(() => (state.value?.status === "ready" ? state.value.diff
 const diffWindow = computed(() => (ready.value ? reactive(wholeFileWindow(ready.value.rows)) : null));
 const unfolded = ref(false);
 
-const counts = computed(() => {
-  const rows = ready.value?.rows ?? [];
-  return { added: rows.filter((r) => r.kind === "+").length, removed: rows.filter((r) => r.kind === "-").length };
-});
+const size = computed(() => tour.stat.value?.find((s) => s.file === props.file) ?? null);
 
 /** Everything in the tour that points into this file, in tour order. */
 const pointers = computed(() => {
@@ -32,35 +31,23 @@ const pointers = computed(() => {
   return found;
 });
 const range = ({ start, end, side }: Anchor) => `${side === "old" ? "removed " : ""}L${start}${end === start ? "" : `–${end}`}`;
-const hit = (row: Row, side: Side) => pointers.value.some(({ anchor }) => (anchor.side ?? "new") === side && inAnchor(row, anchor));
+const anchors = computed(() => anchorsIn(loaded.value, props.file));
+const hit = (row: Row, side: Side) => anchors.value.some((anchor) => (anchor.side ?? "new") === side && inAnchor(row, anchor));
 </script>
 
 <template>
   <div class="file-view">
     <header class="top">
       <span class="path">{{ file }}</span>
-      <span class="small muted">{{ loaded.branch }} → {{ loaded.base }} · {{ shortCommit(loaded.base_sha) }}..{{ shortCommit(loaded.head_sha) }}</span>
-      <span v-if="ready" class="small"><span class="added">+{{ counts.added }}</span> <span class="removed">−{{ counts.removed }}</span></span>
+      <DiffSize v-if="size && size.added !== null && size.removed !== null" :added="size.added" :removed="size.removed" />
       <span class="spacer" />
-      <div class="segmented">
-        <button :class="{ on: tour.preferences.value.diffView === 'unified' }" @click="tour.setDiffView('unified')">Unified</button>
-        <button :class="{ on: tour.preferences.value.diffView === 'split' }" @click="tour.setDiffView('split')">Split</button>
-      </div>
-      <button
-        class="toggle"
-        :class="{ on: tour.preferences.value.wrap || tour.preferences.value.diffView === 'split' }"
-        :disabled="tour.preferences.value.diffView === 'split'"
-        title="Wrap long lines (w); the split view always wraps"
-        @click="tour.toggleWrap()"
-      >
-        Wrap
-      </button>
       <button class="toggle" :class="{ on: unfolded }" title="Show every line instead of folding unchanged ones" @click="unfolded = !unfolded">All lines</button>
     </header>
     <div v-if="pointers.length" class="pointers">
       <span class="small dim">The tour points here:</span>
       <span v-for="(pointer, i) in pointers" :key="i" class="pointer"><span class="mark" />{{ pointer.label }} · {{ range(pointer.anchor) }}</span>
     </div>
+    <div v-else class="pointers"><span class="small dim">No step or concern points into this file.</span></div>
     <main class="body">
       <div v-if="!state || state.status === 'loading'" class="note">Loading diff…</div>
       <div v-else-if="state.status === 'error'" class="note error">{{ state.message }}</div>
@@ -73,7 +60,9 @@ const hit = (row: Row, side: Side) => pointers.value.some(({ anchor }) => (ancho
 
 <style scoped>
 .file-view {
-  height: 100%;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -128,23 +117,9 @@ const hit = (row: Row, side: Side) => pointers.value.some(({ anchor }) => (ancho
 .note.error {
   color: var(--gh-del-sign);
 }
-.added {
-  color: var(--gh-add-sign);
-}
-.removed {
-  color: var(--gh-del-sign);
-}
 .spacer {
   flex: 1;
 }
-.segmented {
-  display: flex;
-  height: 24px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.segmented button,
 .toggle {
   padding: 0 8px;
   border: 0;
@@ -154,18 +129,10 @@ const hit = (row: Row, side: Side) => pointers.value.some(({ anchor }) => (ancho
   font-size: 11px;
   cursor: pointer;
 }
-.segmented button.on {
-  background: var(--selected);
-  color: var(--fg);
-}
 .toggle {
   height: 24px;
   border: 1px solid var(--border);
   border-radius: 6px;
-}
-.toggle:disabled {
-  cursor: default;
-  opacity: 0.6;
 }
 .toggle.on {
   border-color: var(--accent);
@@ -173,9 +140,6 @@ const hit = (row: Row, side: Side) => pointers.value.some(({ anchor }) => (ancho
 }
 .small {
   font-size: 11px;
-}
-.muted {
-  color: var(--muted);
 }
 .dim {
   color: var(--dim);

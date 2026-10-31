@@ -25,7 +25,7 @@ export function parseTour(text: string): ParsedTour {
 
 export function entries(tour: Tour, closelyOnly: boolean): Entry[] {
   const steps = tour.steps.filter((s) => !closelyOnly || s.tag === "read_closely");
-  return [{ id: "overview" }, ...steps.map((step) => ({ id: step.id, step })), { id: "concerns" }];
+  return [{ id: "overview" }, ...steps.map((step) => ({ id: step.id, step })), { id: "concerns" }, { id: "uncovered" }];
 }
 
 export function anchoredFiles(tour: Tour): RepoFile[] {
@@ -36,6 +36,7 @@ export function anchoredFiles(tour: Tour): RepoFile[] {
 export function filesOf(tour: Tour, entry: Entry): RepoFile[] {
   if ("step" in entry) return entry.step.anchors.map((a) => a.file);
   if (entry.id === "concerns") return tour.concerns.flatMap((c) => (c.anchor ? [c.anchor.file] : []));
+  // The uncovered page's files come from the diff's stat, which the tour state holds.
   return [];
 }
 

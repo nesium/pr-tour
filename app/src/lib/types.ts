@@ -26,7 +26,8 @@ export type ProgressKey = Brand<string, "ProgressKey">;
 
 export type Side = "old" | "new";
 export type StepTag = "read_closely" | "skim";
-export type EntryId = StepId | "overview" | "concerns";
+/** "uncovered" lists the changes no step or concern points at. */
+export type EntryId = StepId | "overview" | "concerns" | "uncovered";
 
 export interface Anchor {
   file: RepoFile;
@@ -69,8 +70,8 @@ export interface Progress {
   current: EntryId;
 }
 
-export type Entry = { id: "overview" } | { id: "concerns" } | { id: StepId; step: Step };
+export type Entry = { id: "overview" } | { id: "concerns" } | { id: "uncovered" } | { id: StepId; step: Step };
 
-export const anchorKey = (entry: EntryId | `concern-${number}`, index: number) => `${entry}-${index}` as AnchorKey;
+export const anchorKey = (entry: EntryId | `concern-${number}` | `uncovered-${string}`, index: number) => `${entry}-${index}` as AnchorKey;
 export const shortCommit = (sha: CommitId | null | undefined) => (sha ?? "").slice(0, 7);
 export const highlightKey = (file: RepoFile, side: Side) => `${file}#${side}` as HighlightKey;
