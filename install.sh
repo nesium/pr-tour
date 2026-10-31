@@ -1,8 +1,14 @@
 #!/bin/sh
-# Links the skill into Claude Code and the viewer into Herdr. Safe to run again.
+# Builds the PR Tour app, links it as `pr-tour`, and links the skill into
+# Claude Code and the launcher into Herdr. Safe to run again.
 set -eu
 
 repo=$(cd "$(dirname "$0")" && pwd)
+
+for tool in cargo npm; do
+  command -v "$tool" >/dev/null || { echo "install.sh needs $tool (Rust and Node) to build the app" >&2; exit 1; }
+done
+(cd "$repo/app" && npm ci --silent && npx tauri build --no-bundle)
 
 link() {
   source=$1
@@ -22,4 +28,4 @@ link() {
 link "$repo/skill" "$HOME/.claude/skills/pr-tour"
 link "$repo/herdr/pr-tour" "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pr-tour"
 link "$repo/herdr/pr-tour-open" "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pr-tour-open"
-link "$repo/bin/pr-tour" "$HOME/.local/bin/pr-tour"
+link "$repo/app/src-tauri/target/release/pr-tour" "$HOME/.local/bin/pr-tour"
