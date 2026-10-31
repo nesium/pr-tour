@@ -4,7 +4,7 @@
 
 use crate::generate::{self, AgentChoice, Outcome};
 use crate::locate::{self, Located};
-use crate::types::{BranchName, TourPath};
+use crate::types::{BranchName, RepoFile, TourPath};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
@@ -16,7 +16,8 @@ use std::sync::Mutex;
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
-/// A window's Tauri label: `tour-<hash of the tour path>`, or `start`.
+/// A window's Tauri label: `tour-<hash of the tour path>`, `file-<hash of the
+/// tour path and file>`, or `start`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WindowLabel(String);
 
@@ -29,6 +30,12 @@ impl WindowLabel {
         let mut hasher = DefaultHasher::new();
         tour.hash(&mut hasher);
         WindowLabel(format!("tour-{:016x}", hasher.finish()))
+    }
+
+    fn for_file(tour: &TourPath, file: &RepoFile) -> Self {
+        let mut hasher = DefaultHasher::new();
+        (tour, file).hash(&mut hasher);
+        WindowLabel(format!("file-{:016x}", hasher.finish()))
     }
 
     pub fn of(window: &tauri::Window) -> Self {
@@ -96,9 +103,17 @@ struct TourWindow {
     task: Option<JoinHandle<()>>,
 }
 
+/// One file of a tour, shown whole.
+struct FileWindow {
+    located: Located,
+    file: RepoFile,
+    _watcher: RecommendedWatcher,
+}
+
 #[derive(Default)]
 pub struct Windows {
     tours: Mutex<HashMap<WindowLabel, TourWindow>>,
+    files: Mutex<HashMap<WindowLabel, FileWindow>>,
     start_message: Mutex<Option<String>>,
     /// One open at a time: between finding no window and creating one, another
     /// open of the same tour would create a second.
@@ -110,15 +125,24 @@ pub struct Windows {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum WindowContent {
     Tour { located: Located },
+    File { located: Located, file: RepoFile },
     Start { message: Option<String> },
 }
 
 impl Windows {
     pub fn content(&self, label: &WindowLabel) -> WindowContent {
-        match self.tours.lock().unwrap().get(label) {
-            Some(window) => WindowContent::Tour { located: window.located.clone() },
-            None => WindowContent::Start { message: self.start_message.lock().unwrap().clone() },
+        if let Some(window) = self.tours.lock().unwrap().get(label) {
+            return WindowContent::Tour { located: window.located.clone() };
         }
+        if let Some(window) = self.files.lock().unwrap().get(label) {
+            return WindowContent::File { located: window.located.clone(), file: window.file.clone() };
+        }
+        WindowContent::Start { message: self.start_message.lock().unwrap().clone() }
+    }
+
+    /// The tour a tour window shows.
+    fn content_located(&self, label: &WindowLabel) -> Option<Located> {
+        self.tours.lock().unwrap().get(label).map(|w| w.located.clone())
     }
 
     pub fn generation(&self, label: &WindowLabel) -> GenerationState {
@@ -127,6 +151,7 @@ impl Windows {
 
     /// Forgets a closed window, which stops its watcher and any generation.
     pub fn closed(&self, label: &WindowLabel) {
+        self.files.lock().unwrap().remove(label);
         if let Some(window) = self.tours.lock().unwrap().remove(label) {
             if let Some(task) = window.task {
                 task.abort();
@@ -173,6 +198,30 @@ pub async fn open(app: &AppHandle, request: OpenRequest) -> Result<(), String> {
     if request.generate && waiting {
         start_generation(app, &label)?;
     }
+    Ok(())
+}
+
+/// Opens one file of the tour shown in `from` in a window of its own, or
+/// brings that window to the front.
+pub fn open_file(app: &AppHandle, from: &WindowLabel, file: RepoFile) -> Result<(), String> {
+    let windows = app.state::<Windows>();
+    let located = windows.content_located(from).ok_or("this window has no tour")?;
+    let label = WindowLabel::for_file(&located.path, &file);
+    if let Some(window) = app.get_webview_window(label.as_str()) {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    let name = file.as_str().rsplit('/').next().unwrap_or(file.as_str()).to_owned();
+    let title = format!("{name} · {}", located.branch);
+    let watcher = watch(app, &label, &located.path)?;
+    windows.files.lock().unwrap().insert(label.clone(), FileWindow { located, file, _watcher: watcher });
+    WebviewWindowBuilder::new(app, label.as_str(), WebviewUrl::App("index.html".into()))
+        .title(title)
+        .inner_size(1240.0, 900.0)
+        .min_inner_size(600.0, 360.0)
+        .build()
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 

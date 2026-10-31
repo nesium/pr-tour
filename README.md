@@ -120,6 +120,10 @@ step titles, explanations, checks, concerns, file names and the code each
 step shows; matching steps stay in the sidebar and matches are marked on the
 page. Links in the tour open in the browser.
 
+**Whole file ↗** on a diff opens that file's whole diff in a window of its
+own: every hunk, long unchanged runs folded (**All lines** unfolds them), and
+the lines the tour points at marked, with a list of the steps that point there.
+
 Drag the sidebar's edge to resize it; double-click the edge to reset it. The
 view, wrapping, theme and sidebar width are the same in every window, and
 change in all of them at once.

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref } from "vue";
 import ConcernsPage from "./components/ConcernsPage.vue";
+import FileView from "./components/FileView.vue";
 import NoTour from "./components/NoTour.vue";
 import OverviewPage from "./components/OverviewPage.vue";
 import StepPage from "./components/StepPage.vue";
@@ -37,7 +38,14 @@ function onKey(event: KeyboardEvent) {
   }
   const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
   if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
-  const actions: Record<string, () => void> = {
+  const viewing: Record<string, () => void> = {
+    s: () => tour.toggleDiffView(),
+    w: () => tour.toggleWrap(),
+    t: () => tour.cycleTheme(),
+  };
+  // A file window only changes how its diff looks.
+  const actions: Record<string, () => void> = tour.focusFile.value ? viewing : {
+    ...viewing,
     j: () => tour.move(1),
     ArrowDown: () => tour.move(1),
     k: () => tour.move(-1),
@@ -47,9 +55,6 @@ function onKey(event: KeyboardEvent) {
       tour.move(1);
     },
     f: () => tour.toggleFilter(),
-    s: () => tour.toggleDiffView(),
-    w: () => tour.toggleWrap(),
-    t: () => tour.cycleTheme(),
     "/": () => sidebar.value?.focusSearch(),
   };
   const action = actions[event.key];
@@ -67,6 +72,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 
 <template>
   <NoTour v-if="!loaded" />
+  <FileView v-else-if="tour.focusFile.value" :file="tour.focusFile.value" />
   <div v-else class="app">
     <header class="top">
       <div class="bar">

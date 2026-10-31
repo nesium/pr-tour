@@ -49,6 +49,7 @@ pub fn run(args: Vec<String>, starting: LaunchLock) {
             commands::start_generation,
             commands::cancel_generation,
             commands::open_repo,
+            commands::open_file,
             commands::read_tour,
             commands::validate_tour,
             commands::branch_tip,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorWindow, expandUp, fileRows, parseDiff, parseFile, splitItems, windowItems, type DiffItem } from "./diff";
+import { anchorWindow, expandUp, fileRows, parseDiff, parseFile, splitItems, wholeFileWindow, windowItems, type DiffItem } from "./diff";
 import type { Anchor, LineNumber, RepoFile, RowIndex } from "./types";
 
 const anchor = (start: number, end: number, side?: "old" | "new"): Anchor => ({
@@ -98,10 +98,19 @@ describe("windows", () => {
     expect(kinds(windowItems(sparse, hunks, window).items)).toBe(" -+ jump + ");
   });
 
+  it("folds the runs at a whole file's edges", () => {
+    const window = wholeFileWindow(rows);
+    const items = windowItems(rows, hunks, window, { foldEdges: true, maxRows: 10_000 }).items;
+    const folds = items.filter((i) => i.type === "fold").map((i) => (i.type === "fold" ? i.count : 0));
+    expect(folds).toEqual([25]);
+    const tail = windowItems(parseFile(DIFF, numbered(60)).rows, hunks, wholeFileWindow(parseFile(DIFF, numbered(60)).rows), { foldEdges: true, maxRows: 10_000 });
+    expect(tail.items.at(-1)?.type).toBe("fold");
+  });
+
   it("stops at the row limit", () => {
     const window = anchorWindow(rows, anchor(3, 3))!;
     window.hi = (rows.length - 1) as RowIndex;
-    const { items, truncated } = windowItems(rows, hunks, window, 5);
+    const { items, truncated } = windowItems(rows, hunks, window, { maxRows: 5 });
     expect(items.filter((i) => i.type === "row")).toHaveLength(5);
     expect(truncated).toBe(true);
   });

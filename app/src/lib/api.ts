@@ -4,7 +4,10 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { BranchName, CommitId, LockPath, RepoFile, RepoRoot, TourPath, ToursFolder } from "./types";
 
 /** What this window shows: a tour, or the start window with why it opened. */
-export type WindowContent = { kind: "tour"; located: Located } | { kind: "start"; message: string | null };
+export type WindowContent =
+  | { kind: "tour"; located: Located }
+  | { kind: "file"; located: Located; file: RepoFile }
+  | { kind: "start"; message: string | null };
 
 export interface GenerationState {
   running: boolean;
@@ -36,6 +39,7 @@ export interface FileDiff {
 export const api = {
   windowContent: () => invoke<WindowContent>("window_content"),
   openRepo: (repo: string) => invoke<void>("open_repo", { repo }),
+  openFile: (file: RepoFile) => invoke<void>("open_file", { file }),
   generationState: () => invoke<GenerationState>("generation_state"),
   startGeneration: () => invoke<void>("start_generation"),
   cancelGeneration: () => invoke<void>("cancel_generation"),

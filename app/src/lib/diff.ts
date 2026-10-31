@@ -119,12 +119,28 @@ export function anchorWindow(rows: Row[], anchor: Anchor): DiffWindow | null {
 
 const jumpsBetween = (a: Row, b: Row) => a.hunk !== undefined && b.hunk !== undefined && a.hunk !== b.hunk;
 
+export interface WindowOptions {
+  maxRows?: number;
+  /**
+   * Fold runs at the window's edges too. An anchor's window leaves them open,
+   * since its expanders grow it there; a whole file has nothing to grow into.
+   */
+  foldEdges?: boolean;
+  /** False shows every line, folding nothing. */
+  fold?: boolean;
+}
+
+/** All of a file's rows, for the file view. */
+export function wholeFileWindow(rows: Row[]): DiffWindow {
+  return { lo: rowIndex(0), hi: rowIndex(Math.max(0, rows.length - 1)), open: new Set() };
+}
+
 /**
  * What a window draws, top to bottom: rows, a header where the diff jumps between
  * hunks without the lines in between, and a fold for each long run of unchanged
- * lines that hasn't been opened. Runs touching the window's edges stay unfolded.
+ * lines that hasn't been opened.
  */
-export function windowItems(rows: Row[], hunks: Hunk[], window: DiffWindow, maxRows = MAX_ROWS): { items: DiffItem[]; truncated: boolean } {
+export function windowItems(rows: Row[], hunks: Hunk[], window: DiffWindow, { maxRows = MAX_ROWS, foldEdges = false, fold = true }: WindowOptions = {}): { items: DiffItem[]; truncated: boolean } {
   const items: DiffItem[] = [];
   let shown = 0;
   for (let i = window.lo as number; i <= window.hi && shown < maxRows; i++) {
@@ -134,11 +150,11 @@ export function windowItems(rows: Row[], hunks: Hunk[], window: DiffWindow, maxR
       items.push({ type: "jump", key: `jump-${i}`, header: hunks[row.hunk!].header });
     }
     const startsRun = row.gap && !previous?.gap;
-    if (startsRun && i !== window.lo && !window.open.has(rowIndex(i))) {
+    if (fold && startsRun && (foldEdges || i !== window.lo) && !window.open.has(rowIndex(i))) {
       let end = i;
       while (end + 1 <= window.hi && rows[end + 1].gap) end++;
       const count = end - i + 1;
-      if (count > FOLD_AFTER && end !== window.hi) {
+      if (count > FOLD_AFTER && (foldEdges || end !== window.hi)) {
         items.push({ type: "fold", key: `fold-${i}`, start: rowIndex(i), count });
         i = end;
         continue;

@@ -28,6 +28,8 @@ export function createTourState() {
   const missing = ref(false);
   const generation = ref<GenerationState>({ running: false, lines: [], failure: null });
   const located = shallowRef<Located | null>(null);
+  /** Set in a file window: it shows this one file of the tour, whole. */
+  const focusFile = ref<RepoFile | null>(null);
   // Tours never change in place: a new file means a new object, so nothing inside needs tracking.
   const tour = shallowRef<Tour | null>(null);
   const tip = ref<CommitId | null>(null);
@@ -216,6 +218,10 @@ export function createTourState() {
     tour.value = next;
     if (!list.value.some((e) => e.id === progress.value.current)) go(list.value[0].id);
 
+    if (focusFile.value) {
+      request([focusFile.value], true);
+      return;
+    }
     request(current.value ? filesOf(next, current.value) : [], true);
     request(anchoredFiles(next), false);
     void api.validateTour(at.root, at.path).then((found) => {
@@ -248,6 +254,7 @@ export function createTourState() {
       return;
     }
     located.value = content.located;
+    if (content.kind === "file") focusFile.value = content.file;
     let pending: ReturnType<typeof setTimeout> | undefined;
     await api.onTourChanged(() => {
       clearTimeout(pending);
@@ -273,7 +280,7 @@ export function createTourState() {
   }
 
   watch(current, (entry) => {
-    if (entry && tour.value) request(filesOf(tour.value, entry), true);
+    if (entry && tour.value && !focusFile.value) request(filesOf(tour.value, entry), true);
   });
 
   return {
@@ -283,6 +290,7 @@ export function createTourState() {
     missing,
     generation,
     tour,
+    focusFile,
     highlights,
     preferences,
     setDiffView,
