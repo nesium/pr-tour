@@ -3,7 +3,7 @@ use crate::types::{BranchName, LockPath, RepoRoot, TourPath, ToursFolder};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Located {
     pub root: RepoRoot,

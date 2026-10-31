@@ -1,6 +1,5 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { computed, reactive, ref, shallowReactive, shallowRef, watch, type InjectionKey } from "vue";
-import { api, type FileDiff, type Located } from "./api";
+import { api, type FileDiff, type GenerationState, type Located } from "./api";
 import { anchorWindow, parseFile, type DiffWindow, type ParsedDiff, type Row } from "./diff";
 import { progressKey, readProgress, writeProgress } from "./progress";
 import { anchoredFiles, entries, filesOf, isStep, parseTour } from "./tour";
@@ -17,6 +16,12 @@ const LOADING: DiffState = { status: "loading" };
 
 export function createTourState() {
   const status = ref("Looking for a tour…");
+  /** The start window, opened without a repository or when one couldn't be opened. */
+  const choosing = ref(false);
+  const writing = ref(false);
+  /** No tour and none being written: one can be started here. */
+  const missing = ref(false);
+  const generation = ref<GenerationState>({ running: false, lines: [], failure: null });
   const located = shallowRef<Located | null>(null);
   // Tours never change in place: a new file means a new object, so nothing inside needs tracking.
   const tour = shallowRef<Tour | null>(null);
@@ -29,7 +34,7 @@ export function createTourState() {
   const windows = new Map<AnchorKey, DiffWindow>();
 
   let key: ProgressKey | null = null;
-  let generation = 0;
+  let loadNumber = 0;
   let queue: RepoFile[] = [];
   let active = 0;
 
@@ -95,13 +100,13 @@ export function createTourState() {
     if (!at || !reviewed) return;
     while (active < PARALLEL_DIFFS && queue.length) {
       const file = queue.shift()!;
-      const loadedFor = generation;
+      const loadedFor = loadNumber;
       active++;
       api
         .fileDiff(at.root, reviewed.base_sha, reviewed.head_sha, file)
         .then(toDiffState, (e): DiffState => ({ status: "error", message: String(e) }))
         .then((state) => {
-          if (loadedFor === generation) diffs.set(file, state);
+          if (loadedFor === loadNumber) diffs.set(file, state);
         })
         .finally(() => {
           active--;
@@ -113,10 +118,12 @@ export function createTourState() {
   async function load() {
     const at = located.value;
     if (!at) return;
-    const loading = ++generation;
+    const loading = ++loadNumber;
     queue = [];
     const file = await api.readTour(at.path);
-    if (loading !== generation) return;
+    if (loading !== loadNumber) return;
+    writing.value = file.writing;
+    missing.value = file.text === null && !file.writing;
     if (file.text === null) {
       tour.value = null;
       status.value = file.writing
@@ -133,7 +140,7 @@ export function createTourState() {
     const next = parsed.tour;
     const nextKey = progressKey(at.root, next.branch ?? at.branch, next.head_sha);
     const [nextTip, saved] = await Promise.all([api.branchTip(at.root, next.branch ?? at.branch), readProgress(nextKey)]);
-    if (loading !== generation) return;
+    if (loading !== loadNumber) return;
 
     diffs.clear();
     windows.clear();
@@ -147,41 +154,78 @@ export function createTourState() {
     request(current.value ? filesOf(next, current.value) : [], true);
     request(anchoredFiles(next), false);
     void api.validateTour(at.root, at.path).then((found) => {
-      if (loading === generation) problems.value = found;
+      if (loading === loadNumber) problems.value = found;
     });
   }
 
+  async function showStart() {
+    const content = await api.windowContent();
+    if (content.kind === "start") status.value = content.message ?? "Choose a repository to review the branch checked out in it.";
+  }
+
   async function start() {
-    const launch = await api.launch();
-    if (launch.problem) {
-      status.value = launch.problem;
+    const content = await api.windowContent();
+    if (content.kind === "start") {
+      choosing.value = true;
+      await api.onStartChanged(showStart);
+      await showStart();
       return;
     }
-    if (!launch.repo) {
-      status.value = "Start PR Tour from a repository: pr-tour [branch] [--repo <path>]";
-      return;
-    }
-    try {
-      located.value = await api.locate(launch.repo, launch.branch, launch.tour);
-    } catch (e) {
-      status.value = String(e);
-      return;
-    }
-    void getCurrentWindow().setTitle(`Tour · ${located.value.branch}`);
+    located.value = content.located;
     let pending: ReturnType<typeof setTimeout> | undefined;
     await api.onTourChanged(() => {
       clearTimeout(pending);
       pending = setTimeout(load, RELOAD_DEBOUNCE_MS);
     });
-    await api.watchTour(located.value.path);
+    // Listen before asking, so no update falls between the two.
+    await api.onGeneration((state) => (generation.value = state));
+    generation.value = await api.generationState();
     await load();
+  }
+
+  async function chooseRepo(repo: string) {
+    status.value = "Opening…";
+    try {
+      await api.openRepo(repo);
+    } catch (e) {
+      status.value = String(e);
+    }
+  }
+
+  function writeTour() {
+    void api.startGeneration().catch((e) => (generation.value = { running: false, lines: [], failure: String(e) }));
   }
 
   watch(current, (entry) => {
     if (entry && tour.value) request(filesOf(tour.value, entry), true);
   });
 
-  return { status, tour, tip, stale, problems, closelyOnly, progress, diffs, list, current, isStep, start, go, move, toggleDone, toggleFilter, windowFor };
+  return {
+    status,
+    choosing,
+    writing,
+    missing,
+    generation,
+    tour,
+    tip,
+    stale,
+    problems,
+    closelyOnly,
+    progress,
+    diffs,
+    list,
+    current,
+    isStep,
+    start,
+    chooseRepo,
+    writeTour,
+    stopWriting: () => void api.cancelGeneration(),
+    go,
+    move,
+    toggleDone,
+    toggleFilter,
+    windowFor,
+  };
 }
 
 function toDiffState(file: FileDiff): DiffState {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide } from "vue";
 import ConcernsPage from "./components/ConcernsPage.vue";
+import NoTour from "./components/NoTour.vue";
 import OverviewPage from "./components/OverviewPage.vue";
 import StepPage from "./components/StepPage.vue";
 import TourSidebar from "./components/TourSidebar.vue";
@@ -42,10 +43,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 </script>
 
 <template>
-  <div v-if="!loaded" class="empty">
-    <div class="strong">Reviewer's tour</div>
-    <div class="muted">{{ tour.status.value }}</div>
-  </div>
+  <NoTour v-if="!loaded" />
   <div v-else class="app">
     <header class="top">
       <div class="bar">
@@ -86,16 +84,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 </template>
 
 <style scoped>
-.empty {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 24px;
-  text-align: center;
-}
 .app {
   height: 100%;
   display: flex;

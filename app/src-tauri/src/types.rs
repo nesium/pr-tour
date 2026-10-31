@@ -126,6 +126,15 @@ string_newtype!(
     }
 );
 
+string_newtype!(
+    /// A Claude Code session, as named by its transcript file and `--resume`.
+    SessionId,
+    |v| {
+        let valid = !v.is_empty() && !v.starts_with('-') && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        if valid { Ok(()) } else { Err(format!("not a session id: {v:?}")) }
+    }
+);
+
 path_newtype!(
     /// The top of a work tree.
     RepoRoot,

@@ -9,15 +9,17 @@ name = "pr_tour_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
+chrono = "0.4.45"
+libc = "0.2.191"
 notify = "8.2.1"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
 tauri-plugin-store = "2"
-tokio = { version = "1.54.1", features = ["process", "macros", "rt-multi-thread", "sync"] }
+tempfile = "3.27.0"
+tokio = { version = "1.54.1", features = ["process", "macros", "rt-multi-thread", "sync", "time", "io-util", "fs"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-
-[dev-dependencies]
-tempfile = "3.27.0"
