@@ -21,4 +21,5 @@ link() {
 
 link "$repo/skill" "$HOME/.claude/skills/pr-tour"
 link "$repo/herdr/pr-tour" "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pr-tour"
+link "$repo/herdr/pr-tour-open" "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pr-tour-open"
 link "$repo/bin/pr-tour" "$HOME/.local/bin/pr-tour"

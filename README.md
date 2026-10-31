@@ -18,6 +18,7 @@ later anything published) is rendered from it.
 | `skill/validate.py` | Checks a tour against the format and the real diff (Python 3, standard library only) |
 | `bin/pr-tour` | Writes a tour headless, when no agent session is open |
 | `herdr/pr-tour/` | The Herdr mod that shows a tour |
+| `herdr/pr-tour-open/` | The Herdr launcher behind the key: opens or generates the tour of the focused terminal's branch |
 | `install.sh` | Links the skill, the command and the mod into place |
 
 ## Install
@@ -27,11 +28,10 @@ git clone https://ci.nsm.one/mb/pr-tour.git ~/Documents/pr-tour
 ~/Documents/pr-tour/install.sh
 ```
 
-This links `~/.claude/skills/pr-tour`, `~/.local/bin/pr-tour` and
-`~/.config/herdr-app/mods/pr-tour` to the checkout, so a `git pull` updates
-all three. It refuses to replace a folder
-that isn't a link. Restart Claude Code sessions that were already running so
-they see the skill.
+This links `~/.claude/skills/pr-tour`, `~/.local/bin/pr-tour` and the two
+Herdr mods to the checkout, so a `git pull` updates all of them. It refuses
+to replace a folder that isn't a link. Restart Claude Code sessions that were
+already running so they see the skill.
 
 Requires Claude Code, git and Python 3. The viewer requires Herdr.
 
@@ -59,6 +59,21 @@ Without `--base`, the base is `develop` if it exists, else `main`, else
 The skill writes the tour, runs `validate.py` until it passes, and opens a
 `Tour · <branch>` tab in Herdr. If that tab is already open, it reloads by
 itself when the tour changes.
+
+### With one key in Herdr
+
+Bind the launcher in `~/.config/herdr-app/keys.json`:
+
+```json
+"global": { "cmd-shift-r": "mod.open:pr-tour-open" }
+```
+
+In a terminal in the repo, press the key. It opens the `Tour · <branch>` tab
+for that terminal's branch, or switches to it if it's already open anywhere.
+When there is no tour yet and none is being written, it starts `pr-tour` in a
+pane below the viewer. That pane closes when the tour is written, or stays
+open with the error until you press Enter. Pressing the key again never opens
+a second tab or starts a second generation.
 
 ### Without an open session
 

@@ -120,7 +120,8 @@ export default class PrTour extends View {
         cx.notify();
         for (;;) {
           const changed = await watchFolder(this.folder);
-          if (changed.some((p) => p === this.path)) { await this.load(); cx.notify(); }
+          const lock = this.path.replace(/\.json$/, ".lock");
+          if (changed.some((p) => p === this.path || p === lock)) { await this.load(); cx.notify(); }
         }
       } catch (e) {
         this.status = String(e.message ?? e);
@@ -133,7 +134,10 @@ export default class PrTour extends View {
     const text = await readTextFile(this.path);
     if (text === null) {
       this.tour = null;
-      this.status = `No tour yet for ${this.branch}. Waiting for ${this.path}`;
+      const writing = await readTextFile(this.path.replace(/\.json$/, ".lock"));
+      this.status = writing !== null
+        ? `Writing the tour for ${this.branch}… It shows here when it's ready.`
+        : `No tour yet for ${this.branch}. Run /pr-tour in its session, or pr-tour in a terminal.`;
       return;
     }
     let tour;
