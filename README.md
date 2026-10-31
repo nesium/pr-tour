@@ -114,12 +114,17 @@ else from the installed skill, else from the copies built into the binary.
 | `f` | Show only "read closely" steps |
 | `s` | Switch between the unified and the split view |
 | `w` | Wrap long lines (the split view always wraps) |
+| `t` | Switch the theme: system, light, dark |
 | `/` or `⌘F` | Search the tour; `⏎` / `⇧⏎` go to the next / previous match, `esc` clears |
 
 Code is highlighted for its language, removed lines included. Search covers
 step titles, explanations, checks, concerns, file names and the code each
 step shows; matching steps stay in the sidebar and matches are marked on the
 page. Links in the tour open in the browser.
+
+Drag the sidebar's edge to resize it; double-click the edge to reset it. The
+view, wrapping, theme and sidebar width are the same in every window, and
+change in all of them at once.
 
 Reviewed marks and the current step are kept across restarts, per branch
 commit. When the branch moves past the commit the tour was written for, the
