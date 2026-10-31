@@ -19,7 +19,7 @@ function keepTour(event: MouseEvent) {
 </script>
 
 <template>
-  <div class="markdown" @click="keepTour" v-html="html" />
+  <div class="markdown prose" @click="keepTour" v-html="html" />
 </template>
 
 <style scoped>

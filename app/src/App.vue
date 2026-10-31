@@ -24,6 +24,8 @@ function nextMatch(delta: number) {
 const loaded = computed(() => tour.tour.value);
 const reviewedCount = computed(() => loaded.value?.steps.filter((s) => tour.progress.value.done[s.id]).length ?? 0);
 const currentStep = computed(() => (tour.current.value && "step" in tour.current.value ? tour.current.value.step : null));
+const THEME_LABELS = { system: "◐ System", light: "☀ Light", dark: "☾ Dark" } as const;
+const themeLabel = computed(() => THEME_LABELS[tour.preferences.value.theme]);
 const currentDone = computed(() => Boolean(currentStep.value && tour.progress.value.done[currentStep.value.id]));
 
 function onKey(event: KeyboardEvent) {
@@ -47,6 +49,7 @@ function onKey(event: KeyboardEvent) {
     f: () => tour.toggleFilter(),
     s: () => tour.toggleDiffView(),
     w: () => tour.toggleWrap(),
+    t: () => tour.cycleTheme(),
     "/": () => sidebar.value?.focusSearch(),
   };
   const action = actions[event.key];
@@ -85,6 +88,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         >
           Wrap
         </button>
+        <button class="filter" title="Theme: system, light or dark (t)" @click="tour.cycleTheme()">{{ themeLabel }}</button>
         <button class="filter" :class="{ on: tour.closelyOnly.value }" @click="tour.toggleFilter()">
           {{ tour.closelyOnly.value ? "● Read closely only" : "○ Read closely only" }}
         </button>
@@ -108,7 +112,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
     <footer class="bottom">
       <button class="button" @click="tour.move(-1)">← Prev</button>
       <button class="button" @click="tour.move(1)">Next →</button>
-      <span class="spacer small dim">j/k move · space reviewed + next · f filter · s split · w wrap · / search</span>
+      <span class="spacer small dim">j/k move · space reviewed + next · f filter · s split · w wrap · t theme · / search</span>
       <button v-if="currentStep" class="button" :class="{ primary: !currentDone }" @click="tour.toggleDone(currentStep.id)">
         {{ currentDone ? "✓ Reviewed" : "Mark reviewed" }}
       </button>

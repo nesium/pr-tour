@@ -8,17 +8,6 @@ const shown = computed(() => (props.tokens && props.tokens.map((t) => t.text).jo
 </script>
 
 <template>
-  <template v-if="shown"><span v-for="(token, i) in shown" :key="i" class="token" :style="{ '--light': token.light, '--dark': token.dark ?? token.light }">{{ token.text }}</span></template>
+  <template v-if="shown"><span v-for="(token, i) in shown" :key="i" class="code-token" :style="{ '--light': token.light, '--dark': token.dark ?? token.light }">{{ token.text }}</span></template>
   <template v-else>{{ text }}</template>
 </template>
-
-<style scoped>
-.token {
-  color: var(--light);
-}
-@media (prefers-color-scheme: dark) {
-  .token {
-    color: var(--dark);
-  }
-}
-</style>

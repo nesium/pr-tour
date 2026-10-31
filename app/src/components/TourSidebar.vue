@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, ref } from "vue";
+import { DEFAULT_PREFERENCES } from "../lib/preferences";
 import type { EntryId, Step } from "../lib/types";
 import { TOUR } from "../lib/useTour";
 
@@ -7,6 +8,26 @@ const props = defineProps<{ concernCount: number }>();
 const emit = defineEmits<{ nextMatch: [delta: number] }>();
 const tour = inject(TOUR)!;
 const search = ref<HTMLInputElement | null>(null);
+
+// While dragging, the width follows the pointer locally; it's saved once, on release.
+const dragging = ref<number | null>(null);
+const width = computed(() => dragging.value ?? tour.preferences.value.sidebarWidth);
+
+function startResize(event: PointerEvent) {
+  const handle = event.currentTarget as HTMLElement;
+  const startX = event.clientX;
+  const startWidth = width.value;
+  handle.setPointerCapture(event.pointerId);
+  const move = (e: PointerEvent) => (dragging.value = tour.clampWidth(startWidth + e.clientX - startX));
+  const end = () => {
+    handle.removeEventListener("pointermove", move);
+    if (dragging.value !== null) tour.setSidebarWidth(dragging.value);
+    dragging.value = null;
+  };
+  handle.addEventListener("pointermove", move);
+  handle.addEventListener("pointerup", end, { once: true });
+  handle.addEventListener("pointercancel", end, { once: true });
+}
 
 const shown = (id: EntryId) => !tour.matching.value || tour.matching.value.has(id);
 const matchCount = computed(() => tour.matching.value?.size ?? null);
@@ -34,7 +55,8 @@ const fileLabel = (step: Step) => {
 </script>
 
 <template>
-  <nav class="sidebar">
+  <nav class="sidebar" :style="{ width: `${width}px` }">
+    <div class="resize" :class="{ active: dragging !== null }" title="Drag to resize" @pointerdown.prevent="startResize" @dblclick="tour.setSidebarWidth(DEFAULT_PREFERENCES.sidebarWidth)" />
     <div class="search">
       <input ref="search" v-model="tour.query.value" type="search" placeholder="Search the tour" spellcheck="false" @keydown="onSearchKey" />
       <span v-if="matchCount !== null" class="count">{{ matchCount ? `${matchCount} match${matchCount === 1 ? "" : "es"} · ⏎ next` : "No matches" }}</span>
@@ -64,14 +86,27 @@ const fileLabel = (step: Step) => {
 
 <style scoped>
 .sidebar {
+  position: relative;
   flex: none;
-  width: 250px;
   overflow-y: auto;
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 1px;
   border-right: 1px solid var(--border);
+}
+.resize {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+.resize:hover,
+.resize.active {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .search {
   display: flex;

@@ -3,9 +3,10 @@ import { api, type FileDiff, type GenerationState, type Located } from "./api";
 import { anchorWindow, parseFile, type DiffWindow, type ParsedDiff, type Row } from "./diff";
 import type { HighlightedLines } from "./highlight";
 import { highlightFile } from "./highlighter";
-import { readPreferences, writePreferences, type DiffView, type Preferences } from "./preferences";
+import { DEFAULT_PREFERENCES, onPreferencesChanged, readPreferences, SIDEBAR_WIDTH, writePreferences, type DiffView, type Preferences } from "./preferences";
 import { progressKey, readProgress, writeProgress } from "./progress";
 import { entryMatches, searchQuery, type CodeOf } from "./search";
+import { applyTheme, type ThemeChoice } from "./theme";
 import { anchoredFiles, entries, filesOf, isStep, parseTour } from "./tour";
 import { highlightKey, type Anchor, type AnchorKey, type CommitId, type EntryId, type HighlightKey, type Progress, type ProgressKey, type RepoFile, type Side, type Tour } from "./types";
 
@@ -38,7 +39,7 @@ export function createTourState() {
   const windows = new Map<AnchorKey, DiffWindow>();
   // Coloured lines per file side, filled in by the highlighting worker as it gets to them.
   const highlights = shallowReactive(new Map<HighlightKey, HighlightedLines>());
-  const preferences = ref<Preferences>({ diffView: "unified", wrap: false });
+  const preferences = ref<Preferences>(DEFAULT_PREFERENCES);
   const query = ref("");
 
   let key: ProgressKey | null = null;
@@ -86,6 +87,10 @@ export function createTourState() {
   const setDiffView = (diffView: DiffView) => setPreferences({ diffView });
   const toggleDiffView = () => setDiffView(preferences.value.diffView === "split" ? "unified" : "split");
   const toggleWrap = () => setPreferences({ wrap: !preferences.value.wrap });
+  const THEMES: ThemeChoice[] = ["system", "light", "dark"];
+  const cycleTheme = () => setPreferences({ theme: THEMES[(THEMES.indexOf(preferences.value.theme) + 1) % THEMES.length] });
+  const clampWidth = (width: number) => Math.round(Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, width)));
+  const setSidebarWidth = (width: number) => setPreferences({ sidebarWidth: clampWidth(width) });
 
   function setProgress(change: Partial<Progress>) {
     progress.value = { ...progress.value, ...change };
@@ -223,7 +228,18 @@ export function createTourState() {
     if (content.kind === "start") status.value = content.message ?? "Choose a repository to review the branch checked out in it.";
   }
 
+  async function startPreferences() {
+    await onPreferencesChanged((changed) => (preferences.value = changed));
+    preferences.value = await readPreferences();
+  }
+
+  watch(
+    () => preferences.value.theme,
+    (theme) => applyTheme(theme),
+  );
+
   async function start() {
+    await startPreferences();
     const content = await api.windowContent();
     if (content.kind === "start") {
       choosing.value = true;
@@ -232,7 +248,6 @@ export function createTourState() {
       return;
     }
     located.value = content.located;
-    preferences.value = await readPreferences();
     let pending: ReturnType<typeof setTimeout> | undefined;
     await api.onTourChanged(() => {
       clearTimeout(pending);
@@ -273,6 +288,9 @@ export function createTourState() {
     setDiffView,
     toggleDiffView,
     toggleWrap,
+    cycleTheme,
+    clampWidth,
+    setSidebarWidth,
     query,
     searched,
     matching,

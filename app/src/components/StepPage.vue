@@ -20,7 +20,7 @@ const done = computed(() => Boolean(tour.progress.value.done[props.step.id]));
     </div>
     <h1>{{ step.title }}</h1>
     <MarkdownText :text="step.why" />
-    <div v-if="step.check" class="check">
+    <div v-if="step.check" class="check prose">
       <div class="check-label">CHECK</div>
       <MarkdownText :text="step.check" />
     </div>

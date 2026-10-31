@@ -16,7 +16,7 @@ const counts = computed(() => {
     <h1>What this change does</h1>
     <MarkdownText :text="tour.intent" />
     <h2>Reading order</h2>
-    <ol class="order">
+    <ol class="order prose">
       <li v-for="(entry, i) in tour.reading_order" :key="entry.file">
         <span class="number">{{ i + 1 }}.</span>
         <div>
