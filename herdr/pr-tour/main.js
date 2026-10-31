@@ -1,0 +1,323 @@
+import { View, div } from "gpui-kit";
+import { v_flex, h_flex, TextView } from "gpui-base";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, props, shared, setShared, nextCommand } from "herdr";
+
+const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false"];
+const PROGRESS = "pr-tour.progress";
+const MAX_ROWS = 400;
+const short = (sha) => (sha ?? "").slice(0, 7);
+const tourFileName = (branch) => `${branch.replaceAll("/", "__")}.json`;
+
+function openedFrom() {
+  const given = props() ?? {};
+  if (given.repo) return given.repo;
+  const f = focused(), pane = f?.pane ? panes().find((p) => p.pane === f.pane) : null;
+  return pane?.cwd || f?.cwd || spaces().find((s) => s.active)?.folder;
+}
+
+function parseDiff(text) {
+  const hunks = [];
+  let hunk = null, old = 0, next = 0;
+  for (const line of text.replace(/\n$/, "").split("\n")) {
+    const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/.exec(line);
+    if (match) {
+      old = +match[1]; next = +match[2];
+      hunk = { header: line, context: match[3].trim(), rows: [] };
+      hunks.push(hunk);
+      continue;
+    }
+    if (!hunk || line.startsWith("\\")) continue;
+    const kind = line[0], body = line.slice(1).replaceAll("\t", "    ") || " ";
+    if (kind === "-") hunk.rows.push({ kind, old: old++, text: body });
+    else if (kind === "+") hunk.rows.push({ kind, new: next++, text: body });
+    else if (kind === " ") hunk.rows.push({ kind, old: old++, new: next++, text: body });
+  }
+  return hunks;
+}
+
+const GITHUB = {
+  dark: {
+    canvas: "#0d1117", fg: "#f0f6fc", muted: "#9198a1", border: "#3d444d", header: "#151b23",
+    add: { line: "#2ea04326", num: "#3fb9504d", sign: "#3fb950" },
+    del: { line: "#f8514926", num: "#f851494d", sign: "#f85149" },
+    hunk: { line: "#388bfd1a", num: "#388bfd33" },
+    selected: "#d29922",
+  },
+  light: {
+    canvas: "#ffffff", fg: "#1f2328", muted: "#59636e", border: "#d1d9e0", header: "#f6f8fa",
+    add: { line: "#dafbe1", num: "#aceebb", sign: "#1a7f37" },
+    del: { line: "#ffebe9", num: "#ffcecb", sign: "#d1242f" },
+    hunk: { line: "#ddf4ff", num: "#b6e3ff" },
+    selected: "#9a6700",
+  },
+};
+const github = () => (settings().dark === false ? GITHUB.light : GITHUB.dark);
+
+function inAnchor(row, anchor) {
+  const n = anchor.side === "old" ? row.old : row.new;
+  return n !== undefined && n >= anchor.start && n <= anchor.end;
+}
+
+export default class PrTour extends View {
+  init(_props, cx) {
+    this.handle = cx.focus_handle();
+    this.diffs = {};
+    this.closelyOnly = false;
+    this.status = "Looking for a tour…";
+    this.locate(cx);
+    cx.spawn(async (cx) => {
+      const keys = { next: "j", prev: "k", reviewed: "space", filter: "f" };
+      for (;;) {
+        const command = await nextCommand();
+        if (this.tour && keys[command]) this.onKey({ key: keys[command] }, { stop_propagation() {}, notify() {} });
+        cx.notify();
+      }
+    });
+  }
+
+  locate(cx) {
+    const folder = openedFrom(), given = props() ?? {};
+    cx.spawn(async (cx) => {
+      try {
+        const git = (args, cwd = folder) => exec("git", [...READ, ...args], { cwd });
+        const top = await git(["rev-parse", "--show-toplevel"]);
+        if (top.code !== 0) throw new Error(`Not a git repository: ${folder}`);
+        this.root = top.stdout.trim();
+        const common = await git(["rev-parse", "--path-format=absolute", "--git-common-dir"], this.root);
+        const branch = given.branch ?? (await git(["symbolic-ref", "--short", "HEAD"], this.root)).stdout.trim();
+        if (!branch) throw new Error("Detached HEAD: open the tour with a branch");
+        this.branch = branch;
+        this.folder = `${common.stdout.trim()}/pr-tours`;
+        this.path = given.tour ?? `${this.folder}/${tourFileName(branch)}`;
+        await exec("mkdir", ["-p", this.folder]);
+        await this.load();
+        cx.notify();
+        for (;;) {
+          const changed = await watchFolder(this.folder);
+          if (changed.some((p) => p === this.path)) { await this.load(); cx.notify(); }
+        }
+      } catch (e) {
+        this.status = String(e.message ?? e);
+        cx.notify();
+      }
+    });
+  }
+
+  async load() {
+    const text = await readTextFile(this.path);
+    if (text === null) {
+      this.tour = null;
+      this.status = `No tour yet for ${this.branch}. Waiting for ${this.path}`;
+      return;
+    }
+    let tour;
+    try { tour = JSON.parse(text); } catch (e) { this.tour = null; this.status = `Tour is not valid JSON: ${e.message}`; return; }
+    if (tour.version !== 1 || !Array.isArray(tour.steps)) { this.tour = null; this.status = "Tour has an unknown format (expected version 1)"; return; }
+    this.tour = tour;
+    this.diffs = {};
+    const tip = await exec("git", [...READ, "rev-parse", tour.branch ?? this.branch], { cwd: this.root });
+    this.tip = tip.code === 0 ? tip.stdout.trim() : null;
+    const files = new Set([...tour.steps.flatMap((s) => s.anchors.map((a) => a.file)), ...tour.concerns.filter((c) => c.anchor).map((c) => c.anchor.file)]);
+    await Promise.all([...files].map(async (file) => {
+      const r = await exec("git", [...READ, "diff", "--no-ext-diff", "--no-color", tour.base_sha, tour.head_sha, "--", file], { cwd: this.root });
+      this.diffs[file] = r.code === 0 ? parseDiff(r.stdout) : { error: r.stderr.trim() };
+    }));
+    if (!this.entries().some((e) => e.id === this.progress().current)) this.go(this.entries()[0].id);
+  }
+
+  key() { return `${this.root}#${this.tour.branch}#${this.tour.head_sha}`; }
+  progress() { return (shared(PROGRESS) ?? {})[this.key()] ?? { done: {}, current: "overview" }; }
+  saveProgress(change) {
+    const all = shared(PROGRESS) ?? {};
+    setShared(PROGRESS, { ...all, [this.key()]: { ...this.progress(), ...change } });
+  }
+
+  entries() {
+    const steps = this.tour.steps.filter((s) => !this.closelyOnly || s.tag === "read_closely");
+    return [{ id: "overview" }, ...steps.map((s) => ({ id: s.id, step: s })), { id: "concerns" }];
+  }
+
+  go(id) { this.saveProgress({ current: id }); }
+  move(delta) {
+    const list = this.entries(), at = Math.max(0, list.findIndex((e) => e.id === this.progress().current));
+    this.go(list[Math.min(list.length - 1, Math.max(0, at + delta))].id);
+  }
+  toggleDone(id) {
+    if (id === "overview" || id === "concerns") return;
+    const done = { ...this.progress().done };
+    if (done[id]) delete done[id]; else done[id] = true;
+    this.saveProgress({ done });
+  }
+
+  onKey(e, cx) {
+    const current = this.progress().current;
+    if (e.key === "j" || e.key === "down") this.move(1);
+    else if (e.key === "k" || e.key === "up") this.move(-1);
+    else if (e.key === "space" || e.key === " ") { this.toggleDone(current); this.move(1); }
+    else if (e.key === "f") { this.closelyOnly = !this.closelyOnly; if (!this.entries().some((x) => x.id === current)) this.go("overview"); }
+    else return;
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  pill(text, fg, bg) {
+    return div().px(6).py(1).rounded(4).text_size(10).font_semibold().text_color(fg).when(Boolean(bg), (e) => e.bg(bg)).child(text);
+  }
+
+  tagPill(step, t) {
+    return step.tag === "read_closely" ? this.pill("READ CLOSELY", t.accent_foreground, t.accent) : this.pill("SKIM", t.muted, t.raised);
+  }
+
+  button(id, label, onClick, t, primary = false) {
+    return div().id(id).h(28).px(12).flex().items_center().rounded(7).cursor_pointer().text_size(12)
+      .bg(primary ? t.solid : t.raised).text_color(primary ? t.solid_foreground : t.foreground)
+      .hover((s) => s.opacity(0.85)).on_click((_e, cx) => { onClick(); cx.notify(); }).child(label);
+  }
+
+  header(t) {
+    const tour = this.tour, steps = tour.steps, done = this.progress().done;
+    const doneCount = steps.filter((s) => done[s.id]).length, stale = this.tip && this.tip !== tour.head_sha;
+    return v_flex().flex_none().border_b(1).border_color(t.border)
+      .child(h_flex().h(42).px(14).gap(8).items_center()
+        .child(div().font_semibold().child("Tour"))
+        .child(div().min_w(0).truncate().text_color(t.muted).child(`${tour.branch} → ${tour.base}`))
+        .child(div().text_size(11).text_color(t.dim).child(`${short(tour.base_sha)}..${short(tour.head_sha)}`))
+        .child(div().flex_1())
+        .child(div().text_size(11).text_color(t.muted).child(`${doneCount}/${steps.length} reviewed`))
+        .child(div().id("filter").h(24).px(8).flex().items_center().gap(6).rounded(6).cursor_pointer().text_size(11)
+          .border_1().border_color(this.closelyOnly ? t.accent : t.border).text_color(this.closelyOnly ? t.accent : t.muted)
+          .on_click((_e, cx) => { this.onKey({ key: "f" }, cx); })
+          .child(this.closelyOnly ? "● Read closely only" : "○ Read closely only")))
+      .when(stale, (e) => e.child(div().px(14).py(4).text_size(11).bg(t.blocked + "22").text_color(t.blocked)
+        .child(`This tour is for ${short(tour.head_sha)}; the branch is now at ${short(this.tip)}. Line notes may be off.`)));
+  }
+
+  sidebar(t) {
+    const { current, done } = this.progress();
+    const row = (id, label, left, right) => h_flex().id(`entry-${id}`).flex_none().min_h(30).px(8).py(4).gap(8).items_center().rounded(7).cursor_pointer()
+      .when(current === id, (e) => e.bg(t.selected)).hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => { this.go(id); this.handle.focus(); cx.notify(); })
+      .child(div().w(16).flex_none().text_center().child(left)).child(div().flex_1().min_w(0).child(label)).when(Boolean(right), (e) => e.child(right));
+    let n = 0;
+    return v_flex().id("tour-steps").w(250).flex_none().h_full().overflow_y_scrollbar().p(6).gap(1).border_r(1).border_color(t.border).children([
+      row("overview", div().font_semibold().child("Overview"), div().text_color(t.dim).child("◇")),
+      ...this.entries().filter((e) => e.step).map(({ id, step }) => {
+        n += 1;
+        const mark = done[id] ? div().text_color(t.done).child("✓") : div().text_size(11).text_color(t.dim).child(String(n));
+        const dot = div().w(6).h(6).flex_none().rounded(3).bg(step.tag === "read_closely" ? t.accent : t.border);
+        return row(id, v_flex().gap(1)
+            .child(div().text_size(12).text_color(done[id] ? t.muted : t.foreground).child(step.title))
+            .child(div().text_size(10).text_color(t.dim).truncate().child(step.anchors[0].file.split("/").pop() + (step.anchors.length > 1 ? ` +${step.anchors.length - 1}` : ""))),
+          mark, h_flex().gap(4).items_center().when(Boolean(step.hotspot), (e) => e.child(div().text_size(11).text_color(t.blocked).child("★"))).child(dot));
+      }),
+      row("concerns", div().font_semibold().child(`Open concerns (${this.tour.concerns.length})`), div().text_color(t.blocked).child("!")),
+    ]);
+  }
+
+  diffRow(row, anchor, g) {
+    const hit = inAnchor(row, anchor), tone = row.kind === "+" ? g.add : row.kind === "-" ? g.del : null;
+    const number = (n) => div().w(44).h_full().flex_none().pr(8).flex().items_center().justify_end().text_color(g.muted)
+      .when(Boolean(tone), (e) => e.bg(tone.num)).child(n === undefined ? "" : String(n));
+    return h_flex().w_full().h(20).flex_none().items_center().when(Boolean(tone), (e) => e.bg(tone.line))
+      .child(div().w(3).h_full().flex_none().when(hit, (e) => e.bg(g.selected)))
+      .child(number(row.old))
+      .child(number(row.new))
+      .child(div().w(22).flex_none().text_center().text_color(tone ? tone.sign : g.muted).child(row.kind === " " ? "" : row.kind))
+      .child(div().flex_1().min_w(0).pr(10).truncate().text_color(g.fg).child(row.text));
+  }
+
+  anchorView(anchor, key, t) {
+    const g = github(), diff = this.diffs[anchor.file];
+    const range = anchor.start === anchor.end ? `L${anchor.start}` : `L${anchor.start}–${anchor.end}`;
+    const box = v_flex().flex_none().rounded(6).overflow_hidden().border_1().border_color(g.border).bg(g.canvas)
+      .child(h_flex().h(36).px(12).gap(10).items_center().bg(g.header).border_b(1).border_color(g.border)
+        .child(div().flex_1().min_w(0).truncate().font_family(settings().font_family ?? "JetBrains Mono").text_size(12).font_semibold().text_color(g.fg).child(anchor.file))
+        .child(div().flex_none().text_size(11).text_color(g.muted).child(anchor.side === "old" ? `${range} (removed)` : range)));
+    if (!diff) return box.child(div().p(12).text_color(g.muted).child("Loading diff…"));
+    if (diff.error) return box.child(div().p(12).text_color(g.del.sign).child(diff.error));
+    const hunks = diff.filter((h) => h.rows.some((r) => inAnchor(r, anchor)));
+    if (!hunks.length) return box.child(div().p(12).text_color(g.selected).child("This anchor doesn't match any change in the diff."));
+    let budget = MAX_ROWS;
+    const code = v_flex().font_family(settings().font_family ?? "JetBrains Mono").text_size(12);
+    hunks.forEach((h) => {
+      if (budget <= 0) return;
+      code.child(h_flex().h(28).flex_none().items_center().bg(g.hunk.line)
+        .child(div().w(91).h_full().flex_none().bg(g.hunk.num))
+        .child(div().flex_1().min_w(0).px(10).truncate().text_color(g.muted).child(h.header)));
+      const rows = h.rows.slice(0, budget);
+      budget -= rows.length;
+      code.children(rows.map((r) => this.diffRow(r, anchor, g)));
+    });
+    if (budget <= 0) code.child(div().px(12).py(6).text_color(g.muted).child(`… showing the first ${MAX_ROWS} lines`));
+    return box.child(code);
+  }
+
+  overview(t) {
+    const tour = this.tour;
+    return v_flex().gap(14)
+      .child(div().text_size(15).font_semibold().child("What this change does"))
+      .child(TextView.markdown("tour-intent", tour.intent).text_size(13))
+      .child(div().text_size(13).font_semibold().pt(4).child("Reading order"))
+      .child(v_flex().gap(8).children(tour.reading_order.map((r, i) => h_flex().gap(10).items_start()
+        .child(div().w(18).flex_none().text_right().text_color(t.dim).child(`${i + 1}.`))
+        .child(v_flex().flex_1().min_w(0).gap(2)
+          .child(div().font_family(settings().font_family ?? "JetBrains Mono").text_size(12).child(r.file))
+          .child(div().text_size(12).text_color(t.muted).child(r.why))))))
+      .child(h_flex().gap(6).pt(4).text_size(11).text_color(t.dim)
+        .child(`${tour.steps.filter((s) => s.tag === "read_closely").length} to read closely · ${tour.steps.filter((s) => s.tag === "skim").length} to skim · ${tour.concerns.length} concerns`)
+        .when(Boolean(tour.author?.agent), (e) => e.child(`· by ${tour.author.agent}`)));
+  }
+
+  concerns(t) {
+    const list = this.tour.concerns;
+    return v_flex().gap(12)
+      .child(div().text_size(15).font_semibold().child("Open concerns"))
+      .when(!list.length, (e) => e.child(div().text_color(t.dim).child("None.")))
+      .children(list.map((c, i) => v_flex().gap(8)
+        .child(h_flex().gap(8).items_start().child(div().flex_none().text_color(t.blocked).child("!")).child(div().flex_1().min_w(0).child(TextView.markdown(`concern-${i}`, c.text).text_size(13))))
+        .when(Boolean(c.anchor), (e) => e.child(this.anchorView(c.anchor, `concern-${i}`, t)))));
+  }
+
+  stepView(step, t) {
+    const done = this.progress().done[step.id];
+    return v_flex().gap(12)
+      .child(h_flex().gap(8).items_center()
+        .child(this.tagPill(step, t))
+        .when(Boolean(step.hotspot), (e) => e.child(this.pill("★ HOTSPOT", t.blocked, t.blocked + "22")))
+        .when(Boolean(done), (e) => e.child(this.pill("✓ REVIEWED", t.done, t.done + "22"))))
+      .child(div().text_size(15).font_semibold().child(step.title))
+      .child(TextView.markdown(`why-${step.id}`, step.why).text_size(13))
+      .when(Boolean(step.check), (e) => e.child(v_flex().gap(4).p(10).rounded(8).border_1().border_color(t.blocked + "66").bg(t.blocked + "14")
+        .child(div().text_size(10).font_semibold().text_color(t.blocked).child("CHECK"))
+        .child(TextView.markdown(`check-${step.id}`, step.check).text_size(13))))
+      .children(step.anchors.map((a, i) => this.anchorView(a, `${step.id}-${i}`, t)));
+  }
+
+  footer(t) {
+    const list = this.entries(), current = this.progress().current, at = list.findIndex((e) => e.id === current);
+    const step = list[at]?.step, done = step && this.progress().done[step.id];
+    return h_flex().flex_none().h(46).px(12).gap(8).items_center().border_t(1).border_color(t.border)
+      .child(this.button("prev", "← Prev", () => this.move(-1), t))
+      .child(this.button("next", "Next →", () => this.move(1), t))
+      .child(div().flex_1().text_size(11).text_color(t.dim).child("j/k move · space reviewed + next · f filter"))
+      .when(Boolean(step), (e) => e.child(this.button("done", done ? "✓ Reviewed" : "Mark reviewed", () => this.toggleDone(step.id), t, !done)));
+  }
+
+  render(cx) {
+    const t = theme();
+    const root = v_flex().id("pr-tour").size_full().min_h(0).bg(t.background).text_color(t.foreground).text_size(13)
+      .track_focus(this.handle).on_key_down((e, cx) => this.tour && this.onKey(e, cx))
+      .on_mouse_down("left", () => this.handle.focus());
+    if (!this.tour) return root.child(v_flex().size_full().items_center().justify_center().p(24).gap(8)
+      .child(div().font_semibold().child("Reviewer's tour"))
+      .child(div().text_color(t.muted).text_center().child(this.status)));
+    const current = this.entries().find((e) => e.id === this.progress().current) ?? this.entries()[0];
+    const body = current.id === "overview" ? this.overview(t) : current.id === "concerns" ? this.concerns(t) : this.stepView(current.step, t);
+    return root
+      .child(this.header(t))
+      .child(h_flex().flex_1().min_h(0)
+        .child(this.sidebar(t))
+        .child(v_flex().id(`detail-${current.id}`).flex_1().min_w(0).h_full().overflow_y_scrollbar().p(18).child(body)))
+      .child(this.footer(t));
+  }
+}
