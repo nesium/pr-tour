@@ -120,9 +120,16 @@ step titles, explanations, checks, concerns, file names and the code each
 step shows; matching steps stay in the sidebar and matches are marked on the
 page. Links in the tour open in the browser.
 
-**Whole file ↗** on a diff opens that file's whole diff in a window of its
-own: every hunk, long unchanged runs folded (**All lines** unfolds them), and
-the lines the tour points at marked, with a list of the steps that point there.
+**Whole file ↗** on a diff opens that file's whole diff in a tab: every hunk,
+long unchanged runs folded (**All lines** unfolds them), and the lines the
+tour points at marked, with a list of the steps that point there. `⌘⇧[` and
+`⌘⇧]` switch tabs; a middle click or `×` closes one.
+
+The header shows the branch's size, as files changed and lines added and
+removed. **Not in the tour**, after the concerns, lists the changes no step or
+concern points at: files the tour never mentions and hunks no anchor
+overlaps. A tour doesn't have to cover everything (mechanical changes may be
+grouped or left out), but this shows what it left out.
 
 Drag the sidebar's edge to resize it; double-click the edge to reset it. The
 view, wrapping, theme and sidebar width are the same in every window, and
