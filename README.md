@@ -17,6 +17,7 @@ later anything published) is rendered from it.
 | `skill/tour.schema.json` | The tour format (version 1) |
 | `skill/validate.py` | Checks a tour against the format and the real diff (Python 3, standard library only) |
 | `bin/pr-tour` | Writes a tour headless, when no agent session is open |
+| `app/` | The standalone viewer (Tauri 2, Vue, TypeScript, Rust), replacing the Herdr mod. Work in progress |
 | `herdr/pr-tour/` | The Herdr mod that shows a tour |
 | `herdr/pr-tour-open/` | The Herdr launcher behind the key: opens or generates the tour of the focused terminal's branch |
 | `install.sh` | Links the skill, the command and the mod into place |
@@ -148,6 +149,27 @@ python3 skill/validate.py <tour.json> --repo <repo>
 It checks the format, unique step IDs, hotspots having a `check`, and that
 every anchor's line range overlaps a hunk of `git diff <base_sha> <head_sha>`.
 It prints `ok: …` and exits 0, or one problem per line and exits 1.
+
+## Standalone app (work in progress)
+
+`app/` is a Tauri 2 app that will replace the Herdr viewer. The webview is
+Vue and TypeScript; the Rust side runs git, watches the tour, and validates
+it. Phase 1 has the viewer and a Rust port of `validate.py`. Launching from
+Herdr, the skill and generation follow.
+
+Requires Rust and Node.
+
+```sh
+cd app && npm install
+npm run tauri dev -- -- --repo /path/to/repo [branch]   # run the viewer
+npm test && (cd src-tauri && cargo test)                 # tests
+```
+
+The same binary validates a tour, with the same output as `validate.py`:
+
+```sh
+app/src-tauri/target/debug/pr-tour validate <tour.json> --repo <repo>
+```
 
 ## Principles
 
