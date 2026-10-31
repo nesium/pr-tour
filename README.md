@@ -16,8 +16,9 @@ later anything published) is rendered from it.
 | `skill/PROMPT.md` | The instructions that shape a tour. Edit freely |
 | `skill/tour.schema.json` | The tour format (version 1) |
 | `skill/validate.py` | Checks a tour against the format and the real diff (Python 3, standard library only) |
+| `bin/pr-tour` | Writes a tour headless, when no agent session is open |
 | `herdr/pr-tour/` | The Herdr mod that shows a tour |
-| `install.sh` | Links the skill and the mod into place |
+| `install.sh` | Links the skill, the command and the mod into place |
 
 ## Install
 
@@ -26,8 +27,9 @@ git clone https://ci.nsm.one/mb/pr-tour.git ~/Documents/pr-tour
 ~/Documents/pr-tour/install.sh
 ```
 
-This links `~/.claude/skills/pr-tour` and `~/.config/herdr-app/mods/pr-tour`
-to the checkout, so a `git pull` updates both. It refuses to replace a folder
+This links `~/.claude/skills/pr-tour`, `~/.local/bin/pr-tour` and
+`~/.config/herdr-app/mods/pr-tour` to the checkout, so a `git pull` updates
+all three. It refuses to replace a folder
 that isn't a link. Restart Claude Code sessions that were already running so
 they see the skill.
 
@@ -57,6 +59,28 @@ Without `--base`, the base is `develop` if it exists, else `main`, else
 The skill writes the tour, runs `validate.py` until it passes, and opens a
 `Tour · <branch>` tab in Herdr. If that tab is already open, it reloads by
 itself when the tour changes.
+
+### Without an open session
+
+From a terminal in the repo:
+
+```sh
+pr-tour                  # the current branch
+pr-tour feat/x --base main
+pr-tour --dry-run        # show the agent, the command and the prompt; run nothing
+```
+
+`pr-tour` forks the Claude Code session that knows the branch best: the newest
+one that edited files in the repo while on that branch, else the newest one
+that ran with it checked out. The fork gets that session's context; the
+session itself is left unchanged. Without such a session, it starts a fresh
+one. `--session <id>` picks a session, `--fresh` skips forking.
+
+The agent can only read files and run `git log`, `git diff` and `git show`.
+`pr-tour` fills in the branch and commit facts itself, validates the tour,
+asks the agent once to fix any problems, and writes the file only when it's
+valid, in one step. A lock stops two generations of the same tour; a tour
+that already covers the branch's commit is kept unless you pass `--force`.
 
 To open the viewer by hand:
 
