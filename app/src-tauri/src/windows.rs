@@ -200,12 +200,14 @@ pub fn show_start(app: &AppHandle, message: Option<String>) {
 }
 
 /// Emits `tour-changed` to the window whenever its tour or lock is written or
-/// removed, and `answers-changed` whenever its answers file is.
+/// removed, and `answers-changed` or `review-changed` whenever its answers or
+/// review file is.
 fn watch(app: &AppHandle, label: &WindowLabel, tour: &TourPath) -> Result<RecommendedWatcher, String> {
     let folder = tour.as_path().parent().ok_or("tour has no folder")?.to_owned();
     let name = |path: &Path| path.file_name().map(ToOwned::to_owned);
     let tour_names: Vec<_> = [name(tour.as_path()), name(tour.lock().as_path())].into_iter().flatten().collect();
     let answers_name = name(tour.answers().as_path());
+    let review_name = name(tour.review().as_path());
     let (app, label) = (app.clone(), label.clone());
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         let Ok(event) = event else { return };
@@ -215,6 +217,9 @@ fn watch(app: &AppHandle, label: &WindowLabel, tour: &TourPath) -> Result<Recomm
         }
         if names.iter().any(|n| answers_name.as_deref() == Some(*n)) {
             let _ = app.emit_to(label.as_str(), "answers-changed", ());
+        }
+        if names.iter().any(|n| review_name.as_deref() == Some(*n)) {
+            let _ = app.emit_to(label.as_str(), "review-changed", ());
         }
     })
     .map_err(|e| e.to_string())?;

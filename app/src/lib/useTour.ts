@@ -9,7 +9,9 @@ import { progressKey, readProgress, writeProgress } from "./progress";
 import { entryMatches, searchQuery, type CodeOf } from "./search";
 import { applyTheme, type ThemeChoice } from "./theme";
 import { anchoredFiles, entries, filesOf, isStep, parseTour } from "./tour";
-import { highlightKey, type Answers, type Anchor, type AnchorKey, type CommitId, type EntryId, type HighlightKey, type HunkIndex, type Progress, type ProgressKey, type RepoFile, type Side, type StepId, type Tour } from "./types";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { handoffPrompt } from "./handoff";
+import { highlightKey, type Answers, type Anchor, type Note, type NoteId, type NoteKind, type NoteLines, type Review, type ReviewChange, type AnchorKey, type CommitId, type EntryId, type HighlightKey, type HunkIndex, type LineNumber, type Progress, type ProgressKey, type RepoFile, type Side, type StepId, type Tour } from "./types";
 
 /** The agent's time limit and a minute's grace, as the generator allows it. */
 const ANSWER_GIVES_UP_AFTER_MS = 21 * 60 * 1000;
@@ -54,6 +56,10 @@ export function createTourState() {
   const preferences = ref<Preferences>(DEFAULT_PREFERENCES);
   const query = ref("");
   const answers = shallowRef<Answers>({ version: 1, entries: [] });
+  const review = shallowRef<Review>({ version: 1, notes: [] });
+  /** Lines picked in a diff for the next note; shift-click extends them. */
+  const noteTarget = ref<NoteLines | null>(null);
+  const reviewError = ref<string | null>(null);
   const askError = ref<string | null>(null);
   const sending = ref(false);
 
@@ -118,6 +124,77 @@ export function createTourState() {
     const cutoff = Date.now() - ANSWER_GIVES_UP_AFTER_MS;
     return sending.value || answers.value.entries.some((e) => e.status === "pending" && Date.parse(e.asked_at) > cutoff);
   });
+
+  /** Open notes, the ones to hand to the author. */
+  const openNotes = computed(() => review.value.notes.filter((n) => n.status === "open"));
+  const notesOf = (step: StepId) => review.value.notes.filter((n) => n.step === step);
+
+  async function loadReview() {
+    try {
+      review.value = await api.readReview();
+    } catch {
+      // A window without a tour has no review.
+    }
+  }
+
+  async function changeReview(change: ReviewChange): Promise<boolean> {
+    reviewError.value = null;
+    try {
+      await api.updateReview(change);
+      await loadReview();
+      return true;
+    } catch (e) {
+      reviewError.value = String(e);
+      return false;
+    }
+  }
+
+  async function addNote(step: StepId, kind: NoteKind, text: string): Promise<boolean> {
+    const reviewed = tour.value;
+    if (!reviewed || !text.trim()) return false;
+    const added = await changeReview({ op: "add", step, head_sha: reviewed.head_sha, kind, text, lines: noteTarget.value });
+    if (added) noteTarget.value = null;
+    return added;
+  }
+
+  const resolveNote = (id: NoteId, resolved: boolean) => changeReview({ op: "resolve", id, resolved });
+  const deleteNote = (id: NoteId) => changeReview({ op: "delete", id });
+
+  /** Picks lines for the next note; `extend` grows the pick within the same file and side. */
+  function pickLine(file: RepoFile, side: Side, line: LineNumber, extend: boolean) {
+    const picked = noteTarget.value;
+    if (extend && picked && picked.file === file && picked.side === side) {
+      const start = Math.min(picked.start, picked.end, line) as LineNumber;
+      const end = Math.max(picked.start, picked.end, line) as LineNumber;
+      noteTarget.value = { file, side, start, end };
+    } else if (picked && picked.file === file && picked.side === side && picked.start === line && picked.end === line) {
+      noteTarget.value = null;
+    } else {
+      noteTarget.value = { file, side, start: line, end: line };
+    }
+  }
+
+  /** The noted lines as they read at the reviewed commit, from the loaded diff. */
+  const codeOfLines = (lines: NoteLines): string[] | null => {
+    const state = diffs.get(lines.file);
+    if (state?.status !== "ready") return null;
+    return state.diff.rows
+      .filter((row) => {
+        const n = lines.side === "old" ? row.old : row.new;
+        return n !== undefined && n >= lines.start && n <= lines.end && (lines.side === "old" ? row.kind !== "+" : row.kind !== "-");
+      })
+      .map((row) => `${lines.side === "old" ? row.old : row.new} ${row.kind} ${row.text}`);
+  };
+
+  /** Copies the open notes as a prompt for the author's session and marks them sent. Returns how many. */
+  async function copyForAuthor(): Promise<number> {
+    const reviewed = tour.value;
+    const notes: Note[] = openNotes.value;
+    if (!reviewed || !notes.length) return 0;
+    await writeText(handoffPrompt(reviewed, notes, codeOfLines));
+    await changeReview({ op: "sent", ids: notes.map((n) => n.id) });
+    return notes.length;
+  }
 
   async function loadAnswers() {
     try {
@@ -364,10 +441,11 @@ export function createTourState() {
       pending = setTimeout(load, RELOAD_DEBOUNCE_MS);
     });
     await api.onAnswersChanged(loadAnswers);
+    await api.onReviewChanged(loadReview);
     // Listen before asking, so no update falls between the two.
     await api.onGeneration((state) => (generation.value = state));
     generation.value = await api.generationState();
-    await Promise.all([load(), loadAnswers()]);
+    await Promise.all([load(), loadAnswers(), loadReview()]);
   }
 
   async function chooseRepo(repo: string) {
@@ -417,6 +495,16 @@ export function createTourState() {
     cycleTheme,
     clampWidth,
     setSidebarWidth,
+    review,
+    openNotes,
+    notesOf,
+    noteTarget,
+    pickLine,
+    addNote,
+    resolveNote,
+    deleteNote,
+    reviewError,
+    copyForAuthor,
     currentAnswers,
     asking,
     askError,

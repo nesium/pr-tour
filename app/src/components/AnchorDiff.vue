@@ -29,7 +29,7 @@ const hit = (row: Row, side: Side) => (props.anchor.side ?? "new") === side && i
     <div v-if="!state || state.status === 'loading'" class="note">Loading diff…</div>
     <div v-else-if="state.status === 'error'" class="note error">{{ state.message }}</div>
     <div v-else-if="!ready || !diffWindow" class="note warning">This anchor doesn't match any change in the diff.</div>
-    <DiffBody v-else :file="anchor.file" :diff="ready" :window="diffWindow" :hit="hit" />
+    <DiffBody v-else :file="anchor.file" :diff="ready" :window="diffWindow" :hit="hit" pickable />
   </section>
 </template>
 
@@ -182,6 +182,23 @@ const hit = (row: Row, side: Side) => (props.anchor.side ?? "new") === side && i
 }
 .diff-box .row.empty {
   background: color-mix(in srgb, var(--gh-border) 25%, transparent);
+}
+.diff-box .pickable .gutter span,
+.diff-box .pickable .gutter.single {
+  cursor: pointer;
+}
+.diff-box .pickable .gutter span:hover,
+.diff-box .pickable .gutter.single:hover {
+  color: var(--gh-fg);
+}
+.diff-box .row.picked {
+  background: color-mix(in srgb, var(--gh-selected) 22%, var(--gh-canvas));
+}
+.diff-box .row.picked .gutter {
+  background: color-mix(in srgb, var(--gh-selected) 30%, var(--gh-canvas));
+}
+.diff-box .row.noted .gutter {
+  box-shadow: inset -3px 0 0 var(--accent);
 }
 .diff-box .row.hit .gutter {
   border-left-color: var(--gh-selected);

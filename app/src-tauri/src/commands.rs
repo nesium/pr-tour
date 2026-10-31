@@ -6,6 +6,7 @@ use crate::generate::ask::{self, Answers, Question};
 use crate::types::{BranchName, CommitId, RepoFile, RepoRoot, StepId, TourPath};
 use crate::windows::{self, GenerationState, OpenRequest, WindowContent, WindowLabel, Windows};
 use crate::stat::{self, FileStat};
+use crate::review::{self, Review, ReviewChange};
 use crate::{git, validate};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -117,4 +118,17 @@ pub async fn ask(window: Window, windows: State<'_, Windows>, step: StepId, ques
         let _ = asked.answer().await;
     });
     Ok(())
+}
+
+/// The reviewer's notes on this window's branch.
+#[tauri::command]
+pub async fn read_review(window: Window, windows: State<'_, Windows>) -> Result<Review, String> {
+    let located = windows.located(&WindowLabel::of(&window)).ok_or("this window has no tour")?;
+    Ok(review::read(&located.path.review()).await)
+}
+
+#[tauri::command]
+pub async fn update_review(window: Window, windows: State<'_, Windows>, change: ReviewChange) -> Result<(), String> {
+    let located = windows.located(&WindowLabel::of(&window)).ok_or("this window has no tour")?;
+    review::change(&located.path.review(), change).await.map_err(|e| e.to_string())
 }

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import type { Answers, BranchName, CommitId, LockPath, RepoFile, RepoRoot, StepId, TourPath, ToursFolder } from "./types";
+import type { Answers, BranchName, CommitId, LockPath, RepoFile, RepoRoot, Review, ReviewChange, StepId, TourPath, ToursFolder } from "./types";
 
 /** What this window shows: a tour, or the start window with why it opened. */
 export type WindowContent = { kind: "tour"; located: Located } | { kind: "start"; message: string | null };
@@ -58,6 +58,8 @@ export const api = {
   branchTip: (root: RepoRoot, branch: BranchName) => invoke<CommitId | null>("branch_tip", { root, branch }),
   diffStat: (root: RepoRoot, base: CommitId, head: CommitId) => invoke<FileStat[]>("diff_stat", { root, base, head }),
   readAnswers: () => invoke<Answers>("read_answers"),
+  readReview: () => invoke<Review>("read_review"),
+  updateReview: (change: ReviewChange) => invoke<void>("update_review", { change }),
   ask: (step: StepId, question: string) => invoke<void>("ask", { step, question }),
   fileDiff: (root: RepoRoot, base: CommitId, head: CommitId, file: RepoFile) => invoke<FileDiff>("file_diff", { root, base, head, file }),
   // Events are sent to one window; listening on the window keeps other tours' events out.
@@ -65,5 +67,6 @@ export const api = {
   onGeneration: (handler: (state: GenerationState) => void): Promise<UnlistenFn> =>
     getCurrentWebviewWindow().listen<GenerationState>("generation", (e) => handler(e.payload)),
   onAnswersChanged: (handler: () => void): Promise<UnlistenFn> => getCurrentWebviewWindow().listen("answers-changed", handler),
+  onReviewChanged: (handler: () => void): Promise<UnlistenFn> => getCurrentWebviewWindow().listen("review-changed", handler),
   onStartChanged: (handler: () => void): Promise<UnlistenFn> => getCurrentWebviewWindow().listen("start-changed", handler),
 };

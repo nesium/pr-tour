@@ -133,6 +133,29 @@ tour leaves out, with **Rewrite the tour** to have the agent write it again
 and cover or skip them. Below it, **Skipped on purpose** lists
 the tour's `skipped` entries with their reasons and the files they match.
 
+### Notes for the author
+
+Under each step's explanation, add **notes**: a **change** the author should
+make, or a **remark** that needs no change. A note is on the step, or on lines:
+click a line number in the step's diff to pick it, shift-click to pick a range,
+click again to clear. Lines with an open note are marked in the diff, and the
+sidebar counts each step's open change requests.
+
+**Copy for the author** (`c`) puts the open notes on the clipboard as a prompt
+for the author's Claude Code session: change requests numbered, each with its
+step, place and code, so the agent can answer per number; remarks after them.
+Paste it into the session, let the agent commit its fixups, then resolve the
+notes it addressed. Copied notes are marked as sent.
+
+Notes are kept per branch, not per commit, so they outlive new commits and
+new tours:
+
+```
+<repo>/.git/pr-tours/<branch>.review.json
+```
+
+A note written about an older commit says so, since its lines may have moved.
+
 ### Asking about a step
 
 The **Ask** panel on the right of the Tour tab (`a` shows or hides it) takes a

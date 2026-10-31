@@ -29,6 +29,8 @@ function startResize(event: PointerEvent) {
   handle.addEventListener("pointercancel", end, { once: true });
 }
 
+const openChanges = (id: EntryId) => tour.openNotes.value.filter((n) => n.step === id && n.kind === "change").length;
+
 const shown = (id: EntryId) => !tour.matching.value || tour.matching.value.has(id);
 const matchCount = computed(() => tour.matching.value?.size ?? null);
 
@@ -76,6 +78,7 @@ const fileLabel = (step: Step) => {
           <span class="files">{{ fileLabel(entry.step) }}</span>
         </span>
         <span class="right">
+          <span v-if="openChanges(entry.id)" class="notes" :title="`${openChanges(entry.id)} open change request(s)`">{{ openChanges(entry.id) }}</span>
           <span v-if="entry.step.hotspot" class="star">★</span>
           <span class="dot" :class="{ closely: entry.step.tag === 'read_closely' }" />
         </span>
@@ -206,6 +209,18 @@ const fileLabel = (step: Step) => {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.notes {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
 }
 .star {
   font-size: 11px;

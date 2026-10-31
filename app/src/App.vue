@@ -38,6 +38,21 @@ const size = computed(() => {
   const sum = (key: "added" | "removed") => files.reduce((total, f) => total + (f[key] ?? 0), 0);
   return { files: files.length, added: sum("added"), removed: sum("removed") };
 });
+/** What "Copy for the author" just did, shown briefly in the footer. */
+const handedOff = ref<string | null>(null);
+let handedOffTimer: ReturnType<typeof setTimeout> | undefined;
+async function copyForAuthor() {
+  let message: string;
+  try {
+    const count = await tour.copyForAuthor();
+    message = count ? `Copied ${count} note${count === 1 ? "" : "s"}; paste them into the author's session` : "No open notes to copy";
+  } catch (e) {
+    message = `Couldn't copy: ${e}`;
+  }
+  handedOff.value = message;
+  clearTimeout(handedOffTimer);
+  handedOffTimer = setTimeout(() => (handedOff.value = null), 4000);
+}
 const currentDone = computed(() => Boolean(currentStep.value && tour.progress.value.done[currentStep.value.id]));
 
 function onKey(event: KeyboardEvent) {
@@ -74,6 +89,7 @@ function onKey(event: KeyboardEvent) {
     },
     f: () => tour.toggleFilter(),
     a: () => tour.toggleChat(),
+    c: () => void copyForAuthor(),
     "/": () => sidebar.value?.focusSearch(),
   };
   const action = actions[event.key];
@@ -169,7 +185,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <button class="button" @click="tour.move(-1)">← Prev</button>
         <button class="button" @click="tour.move(1)">Next →</button>
         <span class="small muted">{{ reviewedCount }}/{{ loaded.steps.length }} reviewed</span>
-        <span class="spacer small dim">j/k move · space reviewed + next · f filter · s split · w wrap · t theme · a ask · / search · ⌘⇧[ ] tabs</span>
+        <button class="button" :disabled="!tour.openNotes.value.length" title="Copy the open notes as a prompt for the author's session (c)" @click="copyForAuthor">
+          Copy for the author<template v-if="tour.openNotes.value.length"> ({{ tour.openNotes.value.length }})</template>
+        </button>
+        <span v-if="handedOff" class="small muted">{{ handedOff }}</span>
+        <span class="spacer small dim">j/k move · space reviewed + next · f filter · s split · w wrap · t theme · a ask · c copy notes · / search · ⌘⇧[ ] tabs</span>
         <button class="button" :class="{ on: tour.preferences.value.chatOpen }" title="Show or hide the chat (a)" @click="tour.toggleChat()">
           {{ tour.preferences.value.chatOpen ? "Ask ⇥" : "⇤ Ask" }}
         </button>
@@ -330,6 +350,10 @@ div.banner {
 }
 .button:hover {
   opacity: 0.85;
+}
+.button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .button.primary {
   background: var(--solid);

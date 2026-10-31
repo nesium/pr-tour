@@ -27,6 +27,8 @@ export type ProgressKey = Brand<string, "ProgressKey">;
 /** One question in a tour's answers file. */
 export type AnswerId = Brand<string, "AnswerId">;
 export type SessionId = Brand<string, "SessionId">;
+/** One note in a branch's review file. */
+export type NoteId = Brand<string, "NoteId">;
 
 export type Side = "old" | "new";
 export type StepTag = "read_closely" | "skim";
@@ -93,6 +95,44 @@ export interface Answers {
   session?: SessionId;
   entries: AnswerEntry[];
 }
+
+/** "change": the author should change something. "remark": to know, no action needed. */
+export type NoteKind = "change" | "remark";
+
+export interface NoteLines {
+  file: RepoFile;
+  side: Side;
+  start: LineNumber;
+  end: LineNumber;
+}
+
+export interface Note {
+  id: NoteId;
+  step: StepId;
+  /** The commit reviewed when the note was written; its lines refer to it. */
+  head_sha: CommitId;
+  kind: NoteKind;
+  text: string;
+  lines?: NoteLines;
+  status: "open" | "resolved";
+  created_at: string;
+  /** When the note was last copied for the author. */
+  sent_at?: string;
+  resolved_at?: string;
+}
+
+/** The reviewer's notes on a branch, kept across commits and tours. */
+export interface Review {
+  version: number;
+  notes: Note[];
+}
+
+export type ReviewChange =
+  | { op: "add"; step: StepId; head_sha: CommitId; kind: NoteKind; text: string; lines: NoteLines | null }
+  | { op: "edit"; id: NoteId; text: string }
+  | { op: "resolve"; id: NoteId; resolved: boolean }
+  | { op: "delete"; id: NoteId }
+  | { op: "sent"; ids: NoteId[] };
 
 export interface Progress {
   done: Partial<Record<StepId, true>>;

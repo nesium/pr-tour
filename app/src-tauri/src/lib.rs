@@ -6,6 +6,7 @@ mod glob;
 mod hunks;
 mod launch_lock;
 mod locate;
+mod review;
 mod stat;
 mod types;
 pub mod validate;
@@ -32,6 +33,7 @@ pub fn run(args: Vec<String>, starting: LaunchLock) {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(Windows::default())
         .setup(move |app| {
             if let Some(starting) = starting.take() {
@@ -61,6 +63,8 @@ pub fn run(args: Vec<String>, starting: LaunchLock) {
             commands::diff_stat,
             commands::read_answers,
             commands::ask,
+            commands::read_review,
+            commands::update_review,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the PR tour app");

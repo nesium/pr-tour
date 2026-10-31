@@ -173,6 +173,19 @@ path_newtype!(
     |p| if p.extension().is_some_and(|e| e == "json") { Ok(()) } else { Err(format!("not an answers file: {}", p.display())) }
 );
 
+path_newtype!(
+    /// The reviewer's notes on a branch, next to its tour: `<branch>.review.json`.
+    /// Per branch, not per commit, so notes outlive new commits and new tours.
+    ReviewPath,
+    |p| if p.extension().is_some_and(|e| e == "json") { Ok(()) } else { Err(format!("not a review file: {}", p.display())) }
+);
+
+string_newtype!(
+    /// One note in a review file: 12 hex characters.
+    NoteId,
+    |v| if !v.is_empty() && v.bytes().all(|b| b.is_ascii_hexdigit()) { Ok(()) } else { Err(format!("not a note id: {v:?}")) }
+);
+
 string_newtype!(
     /// One question in an answers file: 12 hex characters.
     AnswerId,
@@ -198,6 +211,17 @@ impl TourPath {
 
     pub fn answers(&self) -> AnswersPath {
         AnswersPath(self.0.with_extension("answers.json"))
+    }
+
+    pub fn review(&self) -> ReviewPath {
+        ReviewPath(self.0.with_extension("review.json"))
+    }
+}
+
+impl ReviewPath {
+    /// Held for the moment the file is rewritten.
+    pub fn write_lock(&self) -> LockPath {
+        LockPath(self.0.with_extension("write.lock"))
     }
 }
 
@@ -244,7 +268,8 @@ impl fmt::Display for Side {
 }
 
 /// A 1-based line number.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct LineNumber(NonZeroU64);
 
 impl LineNumber {
@@ -318,6 +343,8 @@ mod tests {
         assert_eq!(tour.answers().as_path(), Path::new("/x/fix__a__b.answers.json"));
         assert_eq!(tour.answers().lock().as_path(), Path::new("/x/fix__a__b.answers.lock"));
         assert_eq!(tour.answers().write_lock().as_path(), Path::new("/x/fix__a__b.answers.write.lock"));
+        assert_eq!(tour.review().as_path(), Path::new("/x/fix__a__b.review.json"));
+        assert_eq!(tour.review().write_lock().as_path(), Path::new("/x/fix__a__b.review.write.lock"));
     }
 
     #[test]
