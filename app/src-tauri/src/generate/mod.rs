@@ -8,19 +8,17 @@
 
 pub mod ask;
 mod facts;
-mod lock;
+pub(crate) mod lock;
 mod prompt;
 mod sessions;
 
 use crate::types::{BranchName, CommitId, RepoRoot, SessionId, TourPath};
-use serde::Serialize;
 use crate::validate;
 use facts::Facts;
 use prompt::{Agent, Reply};
 use serde_json::{json, Value};
 use sessions::Session;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -132,7 +130,7 @@ pub async fn generate(request: &Request, progress: impl Fn(String)) -> Result<Ou
             return Err(Failure(format!("the tour is still invalid after one fix; nothing was written:\n{}", problems.join("\n"))));
         }
     }
-    write_json(facts.tour_path.as_path(), &tour)?;
+    crate::files::write_json(facts.tour_path.as_path(), &tour)?;
     let summary = validate::summary(&tour).trim_start_matches("ok: ").to_owned();
     Ok(Outcome::Written { path: facts.tour_path.clone(), summary })
 }
@@ -195,17 +193,6 @@ fn with_facts(output: Value, facts: &Facts, session: &SessionId) -> Value {
     tour
 }
 
-/// Replaces the file in one step, so readers never see half of it.
-fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Failure> {
-    let folder = path.parent().ok_or("file has no folder")?;
-    let fail = |e: std::io::Error| Failure(format!("cannot write {}: {e}", path.display()));
-    std::fs::create_dir_all(folder).map_err(fail)?;
-    let mut temporary = tempfile::Builder::new().prefix(".tour-").suffix(".json").tempfile_in(folder).map_err(fail)?;
-    let text = serde_json::to_string_pretty(value).map_err(|e| Failure(e.to_string()))?;
-    writeln!(temporary, "{text}").map_err(fail)?;
-    temporary.persist(path).map_err(|e| fail(e.error))?;
-    Ok(())
-}
 
 /// `pr-tour generate [branch] [--base <branch>] [--repo <path>] [--fresh | --session <id>]
 ///                   [--force] [--output <file>] [--dry-run]`

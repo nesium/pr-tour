@@ -8,20 +8,18 @@
 
 use super::lock::Lock;
 use super::prompt::{self, Agent, Reply};
-use super::{run_claude, sessions, write_json, Failure};
+use super::{run_claude, sessions, Failure};
+use crate::files::{now, random_id, read_json, update_json};
 use crate::git;
 use crate::hunks::Covered;
 use crate::types::{AnswerId, AnswersPath, BranchName, CommitId, RepoFile, RepoRoot, SessionId, StepId, TourPath};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::hash_map::RandomState;
-use std::hash::BuildHasher;
-use std::time::Duration;
 
 const MAX_HUNK_LINES: usize = 120;
 const MAX_QUESTION_CHARS: usize = 2000;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Answers {
     #[serde(default = "first_version")]
     pub version: u32,
@@ -34,6 +32,12 @@ pub struct Answers {
 
 fn first_version() -> u32 {
     1
+}
+
+impl Default for Answers {
+    fn default() -> Self {
+        Answers { version: 1, session: None, entries: Vec::new() }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -81,8 +85,7 @@ pub struct Asked {
 }
 
 pub async fn read(path: &AnswersPath) -> Answers {
-    let text = tokio::fs::read_to_string(path).await.ok();
-    text.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| Answers { version: 1, ..Answers::default() })
+    read_json(path.as_path()).await
 }
 
 /// Builds the prompt and picks the agent. With `record`, also adds the
@@ -166,18 +169,7 @@ fn finish(answers: &mut Answers, id: &AnswerId, status: Status, answer: String, 
 
 /// Applies `change` to the answers file under its short write lock.
 async fn update(path: &AnswersPath, change: impl FnOnce(&mut Answers)) -> Result<(), Failure> {
-    let mut change = Some(change);
-    for _ in 0..50 {
-        match Lock::take(path.write_lock(), "the answers file is being written") {
-            Ok(_writing) => {
-                let mut answers = read(path).await;
-                (change.take().expect("applied once"))(&mut answers);
-                return write_json(path.as_path(), &answers);
-            }
-            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
-        }
-    }
-    Err(Failure(format!("cannot write {path}")))
+    update_json(path.as_path(), path.write_lock(), change).await
 }
 
 /// Continues this tour's earlier fork, else forks the tour's author, else starts fresh.
@@ -294,13 +286,8 @@ async fn anchor_hunks(root: &RepoRoot, tour: &Value, anchor: &Value) -> String {
     if hunks.is_empty() { "(no matching hunk)".into() } else { hunks.join("\n") }
 }
 
-fn now() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
-}
-
 fn new_id() -> AnswerId {
-    let random = RandomState::new().hash_one(std::time::SystemTime::now());
-    AnswerId::try_from(format!("{:012x}", random & 0xffff_ffff_ffff)).expect("hex")
+    AnswerId::try_from(random_id()).expect("hex")
 }
 
 /// `pr-tour ask --step <id> [--repo <path>] [--branch <branch>] [--dry-run] <question>`

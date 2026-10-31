@@ -1,4 +1,5 @@
 mod commands;
+mod files;
 mod generate;
 mod git;
 mod glob;
