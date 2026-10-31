@@ -31,8 +31,9 @@ pub fn run(args: Vec<String>, starting: LaunchLock) {
         .plugin(tauri_plugin_opener::init())
         .manage(Windows::default())
         .setup(move |app| {
-            // Plugins have run: the single-instance socket is bound.
-            drop(starting.take());
+            if let Some(starting) = starting.take() {
+                starting.release_when_listening(&app.config().identifier);
+            }
             let cwd = std::env::current_dir().unwrap_or_default();
             let request = OpenRequest::from_args(&args, &cwd);
             let app = app.handle().clone();

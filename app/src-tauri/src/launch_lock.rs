@@ -21,6 +21,35 @@ impl LaunchLock {
     }
 }
 
+impl LaunchLock {
+    /// Releases the lock once the single-instance socket exists. The plugin
+    /// removes a stale socket before it binds, in a task that may run after
+    /// setup; releasing earlier would let a second app miss it. Gives up
+    /// waiting after two seconds rather than block other launches for good.
+    pub fn release_when_listening(self, identifier: &str) {
+        let socket = single_instance_socket(identifier);
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while socket.as_ref().is_some_and(|s| !s.exists()) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            drop(self);
+        });
+    }
+}
+
+/// Where tauri-plugin-single-instance listens on macOS (see its socket_path).
+#[cfg(target_os = "macos")]
+fn single_instance_socket(identifier: &str) -> Option<std::path::PathBuf> {
+    Some(std::path::PathBuf::from(format!("/tmp/{}_si.sock", identifier.replace(['.', '-'], "_"))))
+}
+
+/// Elsewhere the plugin doesn't use a socket file to wait for.
+#[cfg(not(target_os = "macos"))]
+fn single_instance_socket(_identifier: &str) -> Option<std::path::PathBuf> {
+    None
+}
+
 #[cfg(unix)]
 fn lock_exclusive(file: &File) -> bool {
     use std::os::fd::AsRawFd;
