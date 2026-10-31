@@ -151,7 +151,7 @@ pub fn describe(session: Option<&Session>) -> String {
     format!("a fork of session {} (last active {when}; {edits}; started with: {})", session.id, py_repr(&topic))
 }
 
-/// Python's repr of a string, which validate.py's predecessor printed.
+/// Python's repr of a string, as the generator has always printed the topic.
 fn py_repr(text: &str) -> String {
     let quote = if text.contains('\'') && !text.contains('"') { '"' } else { '\'' };
     let mut out = String::from(quote);

@@ -17,8 +17,6 @@ later anything published) is rendered from it.
 | `skill/tour.schema.json` | The tour format (version 1) |
 | `app/` | The PR Tour app and the `pr-tour` command (Tauri 2, Vue, TypeScript, Rust): shows, writes and validates tours |
 | `herdr/pr-tour-open/` | The Herdr launcher behind the key: opens the app on the focused terminal's branch |
-| `herdr/pr-tour/` | The former Herdr viewer, replaced by the app |
-| `skill/validate.py`, `bin/pr-tour` | The former Python validator and generator, replaced by `pr-tour validate` and `pr-tour generate` |
 | `install.sh` | Links the skill, the command and the mod into place |
 
 ## Install

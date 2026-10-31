@@ -1,5 +1,6 @@
 //! Checks a tour against the tour format and the repository's real diff.
-//! A port of skill/validate.py: same checks, same messages, same order.
+//! Ported from the former Python validator, whose messages it keeps word for
+//! word: the skill and agents act on them.
 
 use crate::types::{CommitId, LineNumber, LineRange, RepoFile, RepoRoot, Side, StepId};
 use crate::{git, hunks::Covered};
@@ -273,7 +274,7 @@ fn sorted(mut items: Vec<&str>) -> Vec<&str> {
     items
 }
 
-/// Formats like Python's repr of a list of strings, so messages match validate.py.
+/// Formats like Python's repr of a list of strings, as the messages always have.
 fn py_list(items: Vec<&str>) -> String {
     let quoted: Vec<String> = items.iter().map(|s| format!("'{s}'")).collect();
     format!("[{}]", quoted.join(", "))

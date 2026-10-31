@@ -9,7 +9,7 @@ describe("languageFor", () => {
     expect(of("src/lib/diff.ts")).toBe("typescript");
     expect(of("src-tauri/src/main.rs")).toBe("rust");
     expect(of("Sources/App.swift")).toBe("swift");
-    expect(of("skill/validate.py")).toBe("python");
+    expect(of("scripts/release.py")).toBe("python");
     expect(of("README.md")).toBe("markdown");
     expect(of("src/App.vue")).toBe("vue");
   });

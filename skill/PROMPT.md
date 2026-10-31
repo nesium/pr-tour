@@ -31,8 +31,8 @@ One JSON document that validates against `tour.schema.json`. Nothing else.
 
 Line numbers refer to `head_sha` (`side: "new"`), or to `base_sha` for removed
 code (`side: "old"`). Each anchor must overlap a hunk of
-`git diff <base_sha> <head_sha> -- <file>`. `validate.py` checks this; run it
-before you finish.
+`git diff <base_sha> <head_sha> -- <file>`. `pr-tour validate` checks this; run
+it before you finish.
 
 ## Keep it lean
 

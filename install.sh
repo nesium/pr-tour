@@ -26,6 +26,11 @@ link() {
 }
 
 link "$repo/skill" "$HOME/.claude/skills/pr-tour"
-link "$repo/herdr/pr-tour" "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pr-tour"
+# The former Herdr viewer, now the app: drop the link an older install made.
+old_viewer="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pr-tour"
+if [ -L "$old_viewer" ] && [ "$(readlink "$old_viewer")" = "$repo/herdr/pr-tour" ]; then
+  rm "$old_viewer"
+  echo "removed: $old_viewer"
+fi
 link "$repo/herdr/pr-tour-open" "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pr-tour-open"
 link "$repo/app/src-tauri/target/release/pr-tour" "$HOME/.local/bin/pr-tour"
