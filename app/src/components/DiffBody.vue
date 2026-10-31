@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject } from "vue";
 import { expandDown, expandUp, splitItems, windowItems, type DiffWindow, type ParsedDiff, type Row } from "../lib/diff";
-import { highlightKey, type AnchorKey, type NoteLines, type RepoFile, type Side, type StepId } from "../lib/types";
+import { highlightKey, type AnchorKey, type CommitId, type NoteLines, type RepoFile, type Side, type StepId } from "../lib/types";
 import type { DiffItem, SplitItem } from "../lib/diff";
 import { TOUR } from "../lib/useTour";
 import CodeText from "./CodeText.vue";
@@ -15,6 +15,9 @@ const WHOLE_FILE_ROWS = 5000;
 const props = defineProps<{
   file: RepoFile;
   diff: ParsedDiff;
+  /** The commits the diff is between; colours and notes refer to them. */
+  from: CommitId;
+  to: CommitId;
   window: DiffWindow;
   /** Whether a row is marked as one the tour points at, on that side. */
   hit: (row: Row, side: Side) => boolean;
@@ -42,8 +45,8 @@ const topHeader = computed(() => {
 const canGrowUp = computed(() => !props.whole && props.window.lo > 0);
 const canGrowDown = computed(() => !props.whole && props.window.hi < props.diff.rows.length - 1);
 
-const oldLines = computed(() => tour.highlights.get(highlightKey(props.file, "old")));
-const newLines = computed(() => tour.highlights.get(highlightKey(props.file, "new")));
+const oldLines = computed(() => tour.highlights.get(highlightKey(props.file, props.from)));
+const newLines = computed(() => tour.highlights.get(highlightKey(props.file, props.to)));
 /** Removed lines take their colours from the file at base, the rest from the file at head. */
 const tokensOf = (row: Row) => (row.kind === "-" ? oldLines.value?.[row.old! - 1] : newLines.value?.[row.new! - 1]);
 const tone = (row: Row) => ({ add: row.kind === "+", del: row.kind === "-" });
@@ -60,7 +63,7 @@ const target = computed(() => (pickable.value && tour.notePlace.value === props.
 const picked = (row: Row, side: Side) => Boolean(target.value && within(row, side, target.value));
 /** Open notes on this commit mark their lines; an older note's lines may have moved. */
 const noted = (row: Row, side: Side) =>
-  tour.openNotes.value.some((n) => n.lines && n.head_sha === tour.tour.value?.head_sha && within(row, side, n.lines));
+  tour.openNotes.value.some((n) => n.lines && n.head_sha === props.to && within(row, side, n.lines));
 
 function pick(event: MouseEvent, row: Row, side: Side) {
   const line = lineOn(row, side);
@@ -70,7 +73,7 @@ function pick(event: MouseEvent, row: Row, side: Side) {
 /** This step's open notes on this commit, each shown under its last line. */
 const lineNotes = computed(() =>
   pickable.value
-    ? tour.openNotes.value.filter((n) => n.step === props.step && n.lines?.file === props.file && n.head_sha === tour.tour.value?.head_sha)
+    ? tour.openNotes.value.filter((n) => n.step === props.step && n.lines?.file === props.file && n.head_sha === props.to)
     : [],
 );
 const endsAt = (row: Row | undefined, side: Side, lines: NoteLines) => Boolean(row && lines.side === side && lineOn(row, side) === lines.end);
@@ -144,7 +147,7 @@ const rightOf = (row?: Row) => (row?.kind === "-" ? undefined : row);
             <NoteCard :note="note" inline />
           </div>
           <div v-if="composerAfter(item)" class="inline-row composer">
-            <NoteComposer :step="step!" :lines="target" inline @cancel="tour.noteTarget.value = null" />
+            <NoteComposer :step="step!" :head="to" :lines="target" inline @cancel="tour.noteTarget.value = null" />
           </div>
         </template>
       </template>

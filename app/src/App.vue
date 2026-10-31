@@ -6,6 +6,7 @@ import DiffSize from "./components/DiffSize.vue";
 import FileView from "./components/FileView.vue";
 import NoTour from "./components/NoTour.vue";
 import OverviewPage from "./components/OverviewPage.vue";
+import SincePage from "./components/SincePage.vue";
 import StepPage from "./components/StepPage.vue";
 import TabBar from "./components/TabBar.vue";
 import TourSidebar from "./components/TourSidebar.vue";
@@ -27,7 +28,7 @@ function nextMatch(delta: number) {
 }
 
 const loaded = computed(() => tour.tour.value);
-const reviewedCount = computed(() => loaded.value?.steps.filter((s) => tour.progress.value.done[s.id]).length ?? 0);
+const reviewedCount = computed(() => loaded.value?.steps.filter((s) => tour.isReviewed(s.id)).length ?? 0);
 const currentStep = computed(() => (tour.current.value && "step" in tour.current.value ? tour.current.value.step : null));
 const THEME_LABELS = { system: "◐ System", light: "☀ Light", dark: "☾ Dark" } as const;
 const themeLabel = computed(() => THEME_LABELS[tour.preferences.value.theme]);
@@ -53,7 +54,8 @@ async function copyForAuthor() {
   clearTimeout(handedOffTimer);
   handedOffTimer = setTimeout(() => (handedOff.value = null), 4000);
 }
-const currentDone = computed(() => Boolean(currentStep.value && tour.progress.value.done[currentStep.value.id]));
+const currentDone = computed(() => Boolean(currentStep.value && tour.isReviewed(currentStep.value.id)));
+const currentChanged = computed(() => Boolean(currentStep.value && tour.delta.steps.value.get(currentStep.value.id)?.status === "changed"));
 
 function onKey(event: KeyboardEvent) {
   if (!loaded.value) return;
@@ -141,10 +143,29 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <button class="banner-action" @click="tour.writeTour(true)">Try again</button>
       </div>
       <template v-else>
-        <div v-if="tour.stale.value" class="banner">
-          <span>This tour is for {{ shortCommit(loaded.head_sha) }}; the branch is now at {{ shortCommit(tour.tip.value) }}. Line notes may be off.</span>
+        <div v-if="tour.delta.active.value" class="banner info">
+          <span>
+            {{ tour.delta.since.value!.commits.length }} new commit{{ tour.delta.since.value!.commits.length === 1 ? "" : "s" }} since this tour<template
+              v-if="tour.delta.changedSteps.value.length"
+              >, changing {{ tour.delta.changedSteps.value.length }} step{{ tour.delta.changedSteps.value.length === 1 ? "" : "s" }}</template
+            >.
+          </span>
+          <button class="banner-link" @click="tour.go('since')">Review the changes</button>
+          <span class="spacer" />
+          <button class="banner-action" title="Write a new tour for the branch as it is now" @click="tour.writeTour(false)">
+            Rewrite for {{ shortCommit(tour.tip.value) }}
+          </button>
+        </div>
+        <div v-else-if="tour.delta.rewritten.value" class="banner">
+          <span>
+            The branch's history was rewritten since this tour (rebase or force-push), so there's no clean "since". The tour is for
+            {{ shortCommit(loaded.head_sha) }}; the branch is at {{ shortCommit(tour.tip.value) }}.
+          </span>
           <span class="spacer" />
           <button class="banner-action" @click="tour.writeTour(false)">Rewrite for {{ shortCommit(tour.tip.value) }}</button>
+        </div>
+        <div v-else-if="tour.stale.value" class="banner info">
+          <span>The branch moved to {{ shortCommit(tour.tip.value) }}; reading what changed…</span>
         </div>
         <details v-if="tour.tourProblems.value.length" class="banner">
           <summary>
@@ -177,6 +198,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
           <OverviewPage v-if="tour.current.value?.id === 'overview'" :tour="loaded" />
           <ConcernsPage v-else-if="tour.current.value?.id === 'concerns'" :concerns="loaded.concerns" />
           <UncoveredPage v-else-if="tour.current.value?.id === 'uncovered'" />
+          <SincePage v-else-if="tour.current.value?.id === 'since'" />
           <StepPage v-else-if="currentStep" :step="currentStep" />
         </main>
         <ChatPanel v-if="tour.preferences.value.chatOpen" />
@@ -194,7 +216,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
           {{ tour.preferences.value.chatOpen ? "Ask ⇥" : "⇤ Ask" }}
         </button>
         <button v-if="currentStep" class="button" :class="{ primary: !currentDone }" @click="tour.toggleDone(currentStep.id)">
-          {{ currentDone ? "✓ Reviewed" : "Mark reviewed" }}
+          {{ currentDone ? "✓ Reviewed" : currentChanged && tour.progress.value.done[currentStep.id] ? "Mark reviewed again" : "Mark reviewed" }}
         </button>
       </footer>
     </div>

@@ -50,6 +50,8 @@ const skipped = computed(() => {
             v-if="tour.hunkWindowFor(anchorKey(`uncovered-${entry.file}`, hunk), ready(entry.file)!.rows, hunk)"
             :file="entry.file"
             :diff="ready(entry.file)!"
+            :from="tour.tour.value!.base_sha"
+            :to="tour.tour.value!.head_sha"
             :window="tour.hunkWindowFor(anchorKey(`uncovered-${entry.file}`, hunk), ready(entry.file)!.rows, hunk)!"
             :hit="noHit"
           />

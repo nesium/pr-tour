@@ -4,11 +4,12 @@ import { anchorKey, type Step } from "../lib/types";
 import { TOUR } from "../lib/useTour";
 import AnchorDiff from "./AnchorDiff.vue";
 import MarkdownText from "./MarkdownText.vue";
+import StepChanges from "./StepChanges.vue";
 import StepNotes from "./StepNotes.vue";
 
 const props = defineProps<{ step: Step }>();
 const tour = inject(TOUR)!;
-const done = computed(() => Boolean(tour.progress.value.done[props.step.id]));
+const done = computed(() => tour.isReviewed(props.step.id));
 </script>
 
 <template>
@@ -25,6 +26,7 @@ const done = computed(() => Boolean(tour.progress.value.done[props.step.id]));
       <div class="check-label">CHECK</div>
       <MarkdownText :text="step.check" />
     </div>
+    <StepChanges :step="step" />
     <StepNotes :step="step" />
     <AnchorDiff
       v-for="(anchor, i) in step.anchors"

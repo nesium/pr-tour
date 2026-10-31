@@ -52,7 +52,7 @@ const hit = (row: Row, side: Side) => anchors.value.some((anchor) => (anchor.sid
       <div v-if="!state || state.status === 'loading'" class="note">Loading diff…</div>
       <div v-else-if="state.status === 'error'" class="note error">{{ state.message }}</div>
       <section v-else-if="ready && diffWindow" class="diff-box">
-        <DiffBody :file="file" :diff="ready" :window="diffWindow" :hit="hit" whole :unfolded="unfolded" />
+        <DiffBody :file="file" :diff="ready" :from="loaded.base_sha" :to="loaded.head_sha" :window="diffWindow" :hit="hit" whole :unfolded="unfolded" />
       </section>
     </main>
   </div>

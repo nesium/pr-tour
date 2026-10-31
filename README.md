@@ -157,6 +157,26 @@ new tours:
 
 A note written about an older commit says so, since its lines may have moved.
 
+### After new commits
+
+When the branch moves past the tour's commit, for example after the author's
+fixups, the tour stays and the app follows the branch: it checks the tip every
+few seconds and when the window gets focus.
+
+- The header says how many commits are new and how many steps they changed.
+  **Since the tour**, after the overview, lists the commits, the steps they
+  changed, and their diffs.
+- A step whose lines a newer commit changed comes back for review (↻ in the
+  sidebar), with those hunks under its explanation. Marking it reviewed records
+  the commit you reviewed it at; steps the new commits didn't touch stay
+  reviewed.
+- Open notes follow their lines. When a newer commit changed a note's lines,
+  the note offers **Resolve**.
+
+After a rebase or force-push the tour's commit is no longer in the branch's
+history, so there's no clean "since"; the header then offers to rewrite the
+tour.
+
 ### Asking about a step
 
 The **Ask** panel on the right of the Tour tab (`a` shows or hides it) takes a

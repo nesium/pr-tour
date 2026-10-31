@@ -19,7 +19,7 @@ export type RowIndex = Brand<number, "RowIndex">;
 export type HunkIndex = Brand<number, "HunkIndex">;
 /** Identifies one anchor's diff box on a page, e.g. `parse-diff-0`. */
 export type AnchorKey = Brand<string, "AnchorKey">;
-/** One side of one file: `<file>#old` or `<file>#new`. Highlighted lines are kept under it. */
+/** One file at one commit: `<file>@<commit>`. Highlighted lines are kept under it. */
 export type HighlightKey = Brand<string, "HighlightKey">;
 /** One tour of one commit in one repository; review progress is stored under it. */
 export type ProgressKey = Brand<string, "ProgressKey">;
@@ -33,7 +33,7 @@ export type NoteId = Brand<string, "NoteId">;
 export type Side = "old" | "new";
 export type StepTag = "read_closely" | "skim";
 /** "uncovered" lists the changes no step or concern points at. */
-export type EntryId = StepId | "overview" | "concerns" | "uncovered";
+export type EntryId = StepId | "overview" | "concerns" | "uncovered" | "since";
 
 export interface Anchor {
   file: RepoFile;
@@ -136,11 +136,16 @@ export type ReviewChange =
 
 export interface Progress {
   done: Partial<Record<StepId, true>>;
+  /** The commit each step was last reviewed at, once the branch moved past the tour. */
+  seen?: Partial<Record<StepId, CommitId>>;
   current: EntryId;
 }
 
-export type Entry = { id: "overview" } | { id: "concerns" } | { id: "uncovered" } | { id: StepId; step: Step };
+export type Entry = { id: "overview" } | { id: "since" } | { id: "concerns" } | { id: "uncovered" } | { id: StepId; step: Step };
 
-export const anchorKey = (entry: EntryId | `concern-${number}` | `uncovered-${string}`, index: number) => `${entry}-${index}` as AnchorKey;
+export const anchorKey = (entry: EntryId | `concern-${number}` | `uncovered-${string}` | `since-${string}`, index: number) => `${entry}-${index}` as AnchorKey;
 export const shortCommit = (sha: CommitId | null | undefined) => (sha ?? "").slice(0, 7);
-export const highlightKey = (file: RepoFile, side: Side) => `${file}#${side}` as HighlightKey;
+export const highlightKey = (file: RepoFile, commit: CommitId) => `${file}@${commit}` as HighlightKey;
+/** One file's diff between two commits: `<from>..<to>:<file>`. */
+export type RangeKey = Brand<string, "RangeKey">;
+export const rangeKey = (from: CommitId, to: CommitId, file: RepoFile) => `${from}..${to}:${file}` as RangeKey;

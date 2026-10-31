@@ -30,7 +30,17 @@ const hit = (row: Row, side: Side) => (props.anchor.side ?? "new") === side && i
     <div v-if="!state || state.status === 'loading'" class="note">Loading diff…</div>
     <div v-else-if="state.status === 'error'" class="note error">{{ state.message }}</div>
     <div v-else-if="!ready || !diffWindow" class="note warning">This anchor doesn't match any change in the diff.</div>
-    <DiffBody v-else :file="anchor.file" :diff="ready" :window="diffWindow" :hit="hit" :step="step" :place="anchorKey" />
+    <DiffBody
+      v-else
+      :file="anchor.file"
+      :diff="ready"
+      :from="tour.tour.value!.base_sha"
+      :to="tour.tour.value!.head_sha"
+      :window="diffWindow"
+      :hit="hit"
+      :step="step"
+      :place="anchorKey"
+    />
   </section>
 </template>
 

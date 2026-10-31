@@ -29,6 +29,9 @@ function startResize(event: PointerEvent) {
   handle.addEventListener("pointercancel", end, { once: true });
 }
 
+/** A step's number in the tour, the same whether or not entries are filtered or added. */
+const stepNumber = (id: EntryId) => (tour.tour.value?.steps.findIndex((s) => s.id === id) ?? 0) + 1;
+
 const openChanges = (id: EntryId) => tour.openNotes.value.filter((n) => n.step === id && n.kind === "change").length;
 
 const shown = (id: EntryId) => !tour.matching.value || tour.matching.value.has(id);
@@ -69,12 +72,17 @@ const fileLabel = (step: Step) => {
     <button v-if="shown('overview')" class="entry" :class="{ current: tour.current.value?.id === 'overview' }" @click="tour.go('overview')">
       <span class="left dim">◇</span><span class="label strong">Overview</span>
     </button>
-    <template v-for="(entry, n) in tour.list.value" :key="entry.id">
+    <button v-if="tour.delta.active.value && shown('since')" class="entry" :class="{ current: tour.current.value?.id === 'since' }" @click="tour.go('since')">
+      <span class="left changed">↻</span>
+      <span class="label strong">Since the tour<template v-if="tour.delta.since.value"> ({{ tour.delta.since.value.commits.length }})</template></span>
+    </button>
+    <template v-for="entry in tour.list.value" :key="entry.id">
       <button v-if="'step' in entry && shown(entry.id)" class="entry" :class="{ current: tour.current.value?.id === entry.id }" @click="tour.go(entry.id)">
-        <span v-if="tour.progress.value.done[entry.id]" class="left done">✓</span>
-        <span v-else class="left dim small">{{ n }}</span>
+        <span v-if="tour.delta.steps.value.get(entry.id)?.status === 'changed'" class="left changed" title="Changed since reviewed">↻</span>
+        <span v-else-if="tour.progress.value.done[entry.id]" class="left done">✓</span>
+        <span v-else class="left dim small">{{ stepNumber(entry.id) }}</span>
         <span class="label">
-          <span class="title" :class="{ reviewed: tour.progress.value.done[entry.id] }">{{ entry.step.title }}</span>
+          <span class="title" :class="{ reviewed: tour.isReviewed(entry.id) }">{{ entry.step.title }}</span>
           <span class="files">{{ fileLabel(entry.step) }}</span>
         </span>
         <span class="right">
@@ -240,6 +248,9 @@ const fileLabel = (step: Step) => {
 }
 .small {
   font-size: 11px;
+}
+.changed {
+  color: var(--accent);
 }
 .done {
   color: var(--done);

@@ -132,3 +132,38 @@ pub async fn update_review(window: Window, windows: State<'_, Windows>, change: 
     let located = windows.located(&WindowLabel::of(&window)).ok_or("this window has no tour")?;
     review::change(&located.path.review(), change).await.map_err(|e| e.to_string())
 }
+
+/// A commit on the branch since the tour: its id and subject.
+#[derive(Serialize)]
+pub struct Commit {
+    sha: CommitId,
+    subject: String,
+}
+
+/// What happened on the branch between two commits.
+#[derive(Serialize)]
+pub struct Since {
+    /// False when `from` is no longer in the branch's history (a rebase or
+    /// force-push): then there is no clean "what changed since".
+    linear: bool,
+    commits: Vec<Commit>,
+    files: Vec<FileStat>,
+}
+
+#[tauri::command]
+pub async fn branch_since(root: RepoRoot, from: CommitId, to: CommitId) -> Result<Since, String> {
+    let at = root.as_path();
+    let range = format!("{from}..{to}");
+    let ancestor = ["merge-base", "--is-ancestor", from.as_str(), to.as_str()];
+    let log = ["log", "--format=%H%x00%s", "--reverse", range.as_str()];
+    let stat = ["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", from.as_str(), to.as_str()];
+    let (ancestor, log, stat) = tokio::join!(git::run(at, &ancestor), git::text(at, &log), git::text(at, &stat));
+    let commits = log?
+        .lines()
+        .filter_map(|line| {
+            let (sha, subject) = line.split_once('\0')?;
+            Some(Commit { sha: CommitId::try_from(sha).ok()?, subject: subject.to_owned() })
+        })
+        .collect();
+    Ok(Since { linear: ancestor?.success, commits, files: stat::parse_numstat(&stat?) })
+}

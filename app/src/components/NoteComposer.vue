@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { inject, onMounted, ref } from "vue";
 import { where } from "../lib/handoff";
-import type { NoteKind, NoteLines, StepId } from "../lib/types";
+import type { CommitId, NoteKind, NoteLines, StepId } from "../lib/types";
 import { TOUR } from "../lib/useTour";
 
 /**
  * Writes a note on `step`, on `lines` when given. Inline under picked lines
  * it takes focus and can be cancelled; under the explanation it stays.
  */
-const props = defineProps<{ step: StepId; lines?: NoteLines | null; inline?: boolean }>();
+/** `head`: the commit the lines are at; the tour's when not given. */
+const props = defineProps<{ step: StepId; head?: CommitId; lines?: NoteLines | null; inline?: boolean }>();
 const emit = defineEmits<{ cancel: [] }>();
 const tour = inject(TOUR)!;
 const draft = ref("");
@@ -16,7 +17,7 @@ const kind = ref<NoteKind>("change");
 const field = ref<HTMLTextAreaElement | null>(null);
 
 async function add() {
-  if (await tour.addNote(props.step, kind.value, draft.value, props.lines ?? null)) {
+  if (await tour.addNote(props.step, kind.value, draft.value, props.lines ?? null, props.head)) {
     draft.value = "";
     if (props.inline) emit("cancel");
   }

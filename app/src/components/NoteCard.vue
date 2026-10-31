@@ -8,6 +8,8 @@ import { TOUR } from "../lib/useTour";
 const props = defineProps<{ note: Note; inline?: boolean }>();
 const tour = inject(TOUR)!;
 const older = computed(() => props.note.head_sha !== tour.tour.value?.head_sha);
+/** Open notes follow their lines to the branch's tip; changed lines suggest resolving. */
+const drift = computed(() => (props.note.status === "open" ? tour.delta.noteDrift(props.note) : { status: "current" as const }));
 </script>
 
 <template>
@@ -22,6 +24,11 @@ const older = computed(() => props.note.head_sha !== tour.tour.value?.head_sha);
       <button class="note-act" title="Delete" @click="tour.deleteNote(note.id)">×</button>
     </div>
     <div class="note-text">{{ note.text }}</div>
+    <div v-if="drift.status === 'changed'" class="note-drift">
+      A newer commit changed these lines. Addressed?
+      <button class="note-act note-suggest" @click="tour.resolveNote(note.id, true)">Resolve</button>
+    </div>
+    <div v-else-if="drift.status === 'moved'" class="note-drift note-dim">Unchanged since; now at L{{ drift.start }}{{ drift.end === drift.start ? "" : `–${drift.end}` }}.</div>
   </div>
 </template>
 
@@ -62,6 +69,19 @@ const older = computed(() => props.note.head_sha !== tour.tour.value?.head_sha);
 .note-text {
   white-space: pre-wrap;
   font-size: 12.5px;
+}
+.note-drift {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--accent);
+}
+.note-suggest {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  color: var(--accent);
 }
 .note-act {
   padding: 0 6px;

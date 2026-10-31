@@ -61,6 +61,7 @@ pub fn run(args: Vec<String>, starting: LaunchLock) {
             commands::branch_tip,
             commands::file_diff,
             commands::diff_stat,
+            commands::branch_since,
             commands::read_answers,
             commands::ask,
             commands::read_review,

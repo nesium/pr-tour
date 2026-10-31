@@ -6,6 +6,14 @@ import type { Answers, BranchName, CommitId, LockPath, RepoFile, RepoRoot, Revie
 /** What this window shows: a tour, or the start window with why it opened. */
 export type WindowContent = { kind: "tour"; located: Located } | { kind: "start"; message: string | null };
 
+/** What happened on the branch between two commits. */
+export interface Since {
+  /** False when the earlier commit is no longer in the branch's history (a rebase or force-push). */
+  linear: boolean;
+  commits: { sha: CommitId; subject: string }[];
+  files: FileStat[];
+}
+
 /** One changed file's size; null counts for a binary file. */
 /** "tour": the tour is broken. "coverage": a change it doesn't account for. Messages are written for the agent. */
 export interface Problem {
@@ -56,6 +64,7 @@ export const api = {
   readTour: (path: TourPath) => invoke<TourFile>("read_tour", { path }),
   validateTour: (root: RepoRoot, path: TourPath) => invoke<Problem[]>("validate_tour", { root, path }),
   branchTip: (root: RepoRoot, branch: BranchName) => invoke<CommitId | null>("branch_tip", { root, branch }),
+  branchSince: (root: RepoRoot, from: CommitId, to: CommitId) => invoke<Since>("branch_since", { root, from, to }),
   diffStat: (root: RepoRoot, base: CommitId, head: CommitId) => invoke<FileStat[]>("diff_stat", { root, base, head }),
   readAnswers: () => invoke<Answers>("read_answers"),
   readReview: () => invoke<Review>("read_review"),

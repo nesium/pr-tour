@@ -23,9 +23,11 @@ export function parseTour(text: string): ParsedTour {
   return { tour: tour as Tour };
 }
 
-export function entries(tour: Tour, closelyOnly: boolean): Entry[] {
+/** `withSince`: the branch moved past the tour, so "Since the tour" follows the overview. */
+export function entries(tour: Tour, closelyOnly: boolean, withSince = false): Entry[] {
   const steps = tour.steps.filter((s) => !closelyOnly || s.tag === "read_closely");
-  return [{ id: "overview" }, ...steps.map((step) => ({ id: step.id, step })), { id: "concerns" }, { id: "uncovered" }];
+  const since: Entry[] = withSince ? [{ id: "since" }] : [];
+  return [{ id: "overview" }, ...since, ...steps.map((step) => ({ id: step.id, step })), { id: "concerns" }, { id: "uncovered" }];
 }
 
 export function anchoredFiles(tour: Tour): RepoFile[] {

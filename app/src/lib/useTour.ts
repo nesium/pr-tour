@@ -10,11 +10,14 @@ import { entryMatches, searchQuery, type CodeOf } from "./search";
 import { applyTheme, type ThemeChoice } from "./theme";
 import { anchoredFiles, entries, filesOf, isStep, parseTour } from "./tour";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { createDelta } from "./delta";
 import { handoffPrompt } from "./handoff";
 import { highlightKey, type Answers, type Anchor, type Note, type NoteId, type NoteKind, type NoteLines, type Review, type ReviewChange, type AnchorKey, type CommitId, type EntryId, type HighlightKey, type HunkIndex, type LineNumber, type Progress, type ProgressKey, type RepoFile, type Side, type StepId, type Tour } from "./types";
 
 /** The agent's time limit and a minute's grace, as the generator allows it. */
 const ANSWER_GIVES_UP_AFTER_MS = 21 * 60 * 1000;
+/** How often to look for new commits on the branch while the window is open. */
+const TIP_CHECK_MS = 5000;
 /** git processes reading diffs at once. More stay queued, current page first. */
 const PARALLEL_DIFFS = 8;
 /** Writing a tour touches the folder several times in a row; reload once. */
@@ -53,6 +56,7 @@ export function createTourState() {
   const windows = new Map<AnchorKey, DiffWindow>();
   // Coloured lines per file side, filled in by the highlighting worker as it gets to them.
   const highlights = shallowReactive(new Map<HighlightKey, HighlightedLines>());
+  const highlighting = new Set<HighlightKey>();
   const preferences = ref<Preferences>(DEFAULT_PREFERENCES);
   const query = ref("");
   const answers = shallowRef<Answers>({ version: 1, entries: [] });
@@ -70,7 +74,7 @@ export function createTourState() {
   let queue: RepoFile[] = [];
   let active = 0;
 
-  const list = computed(() => (tour.value ? entries(tour.value, closelyOnly.value) : []));
+  const list = computed(() => (tour.value ? entries(tour.value, closelyOnly.value, delta.active.value) : []));
   const current = computed(() => list.value.find((e) => e.id === progress.value.current) ?? list.value[0]);
   const stale = computed(() => Boolean(tip.value && tour.value && tip.value !== tour.value.head_sha));
 
@@ -131,6 +135,27 @@ export function createTourState() {
   const openNotes = computed(() => review.value.notes.filter((n) => n.status === "open"));
   const notesOf = (step: StepId) => review.value.notes.filter((n) => n.step === step);
 
+  const delta = createDelta({
+    tour,
+    tip,
+    located,
+    progress,
+    openNotes,
+    current,
+    highlight: (file, commit, code) => highlight(file, commit, code, loadNumber),
+  });
+
+  /** Follows the branch: new commits show up in the delta without reopening the tour. */
+  async function refreshTip() {
+    const [at, reviewed] = [located.value, tour.value];
+    if (!at || !reviewed) return;
+    const next = await api.branchTip(at.root, reviewed.branch ?? at.branch).catch(() => null);
+    if (next && next !== tip.value && tour.value === reviewed) {
+      tip.value = next;
+      await delta.loadSince();
+    }
+  }
+
   async function loadReview() {
     try {
       review.value = await api.readReview();
@@ -151,10 +176,10 @@ export function createTourState() {
     }
   }
 
-  async function addNote(step: StepId, kind: NoteKind, text: string, lines: NoteLines | null): Promise<boolean> {
+  async function addNote(step: StepId, kind: NoteKind, text: string, lines: NoteLines | null, head?: CommitId): Promise<boolean> {
     const reviewed = tour.value;
     if (!reviewed || !text.trim()) return false;
-    const added = await changeReview({ op: "add", step, head_sha: reviewed.head_sha, kind, text, lines });
+    const added = await changeReview({ op: "add", step, head_sha: head ?? reviewed.head_sha, kind, text, lines });
     if (added && lines) noteTarget.value = null;
     return added;
   }
@@ -258,13 +283,27 @@ export function createTourState() {
     if (next) go(next.id);
   }
 
+  /**
+   * Marks a step reviewed at the branch's tip, or unmarks it. A step that
+   * changed since it was reviewed is marked again rather than unmarked.
+   */
   function toggleDone(id: EntryId) {
     if (!isStepId(id)) return;
     const done = { ...progress.value.done };
-    if (done[id]) delete done[id];
-    else done[id] = true;
-    setProgress({ done });
+    const seen = { ...(progress.value.seen ?? {}) };
+    const changed = delta.steps.value.get(id)?.status === "changed";
+    if (done[id] && !changed) {
+      delete done[id];
+      delete seen[id];
+    } else {
+      done[id] = true;
+      if (delta.active.value && tip.value) seen[id] = tip.value;
+    }
+    setProgress({ done, seen });
   }
+
+  /** Reviewed, and nothing changed it since. */
+  const isReviewed = (id: StepId) => Boolean(progress.value.done[id]) && delta.steps.value.get(id)?.status !== "changed";
 
   function toggleFilter() {
     closelyOnly.value = !closelyOnly.value;
@@ -341,8 +380,8 @@ export function createTourState() {
           (read) => {
             if (loadedFor !== loadNumber) return;
             diffs.set(file, toDiffState(read));
-            highlight(file, "new", read.lines, loadedFor);
-            highlight(file, "old", read.base_lines, loadedFor);
+            highlight(file, reviewed.head_sha, read.lines, loadedFor);
+            highlight(file, reviewed.base_sha, read.base_lines, loadedFor);
           },
           (e) => {
             if (loadedFor === loadNumber) diffs.set(file, { status: "error", message: String(e) });
@@ -355,10 +394,15 @@ export function createTourState() {
     }
   }
 
-  function highlight(file: RepoFile, side: Side, code: string | null, loadedFor: number) {
+  /** Colours the file as it is at `commit`, once per file and commit. */
+  function highlight(file: RepoFile, commit: CommitId, code: string | null, loadedFor: number) {
+    const key = highlightKey(file, commit);
+    if (highlights.has(key) || highlighting.has(key)) return;
+    highlighting.add(key);
     if (code === null) return;
     void highlightFile(file, code).then((lines) => {
-      if (lines && loadedFor === loadNumber) highlights.set(highlightKey(file, side), lines);
+      highlighting.delete(key);
+      if (lines && loadedFor === loadNumber) highlights.set(key, lines);
     });
   }
 
@@ -392,12 +436,14 @@ export function createTourState() {
     diffs.clear();
     windows.clear();
     highlights.clear();
+    highlighting.clear();
     stat.value = null;
     problems.value = [];
     key = nextKey;
     tip.value = nextTip;
     progress.value = saved;
     tour.value = next;
+    void delta.loadSince();
     if (!list.value.some((e) => e.id === progress.value.current)) go(list.value[0].id);
 
     request([...(current.value ? filesOf(next, current.value) : []), ...tabs.value], true);
@@ -449,6 +495,8 @@ export function createTourState() {
     await api.onGeneration((state) => (generation.value = state));
     generation.value = await api.generationState();
     await Promise.all([load(), loadAnswers(), loadReview()]);
+    window.addEventListener("focus", () => void refreshTip());
+    setInterval(() => void refreshTip(), TIP_CHECK_MS);
   }
 
   async function chooseRepo(repo: string) {
@@ -520,6 +568,9 @@ export function createTourState() {
     nextMatch,
     tip,
     stale,
+    delta,
+    isReviewed,
+    refreshTip,
     tourProblems,
     coverageGaps,
     closelyOnly,
