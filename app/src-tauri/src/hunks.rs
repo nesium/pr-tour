@@ -19,6 +19,22 @@ impl Covered {
         covered
     }
 
+    /// The headers of the hunks none of `anchors` overlaps, each on its own side.
+    pub fn uncovered(&self, anchors: &[(Side, LineRange)]) -> Vec<String> {
+        let touches = |(from, len): (u64, u64), lines: LineRange| len > 0 && from <= lines.end().get() && lines.start().get() < from + len;
+        self.old
+            .iter()
+            .zip(&self.new)
+            .filter(|(old, new)| {
+                !anchors.iter().any(|&(side, lines)| match side {
+                    Side::Old => touches(**old, lines),
+                    Side::New => touches(**new, lines),
+                })
+            })
+            .map(|(&(old_start, old_len), &(new_start, new_len))| format!("@@ -{old_start},{old_len} +{new_start},{new_len} @@"))
+            .collect()
+    }
+
     /// Whether any of the lines lies in a hunk on that side.
     pub fn overlaps(&self, side: Side, lines: LineRange) -> bool {
         let ranges = match side {
@@ -54,6 +70,16 @@ mod tests {
         let covered = Covered::parse("diff --git a/x b/x\n@@ -3,2 +3 @@ fn x\n-a\n-b\n+c\n@@ -10,0 +9,4 @@\n");
         assert_eq!(covered.old, vec![(3, 2), (10, 0)]);
         assert_eq!(covered.new, vec![(3, 1), (9, 4)]);
+    }
+
+    #[test]
+    fn lists_hunks_no_anchor_overlaps() {
+        use crate::types::LineNumber;
+        let lines = |a, b| LineRange::new(LineNumber::new(a).unwrap(), LineNumber::new(b).unwrap()).unwrap();
+        let covered = Covered::parse("@@ -2,3 +2,3 @@\n@@ -20,2 +19,0 @@\n@@ -40 +38,2 @@\n");
+        assert_eq!(covered.uncovered(&[]).len(), 3);
+        assert_eq!(covered.uncovered(&[(Side::New, lines(3, 3)), (Side::Old, lines(21, 21))]), vec!["@@ -40,1 +38,2 @@"]);
+        assert_eq!(covered.uncovered(&[(Side::New, lines(19, 19))]).len(), 3);
     }
 
     #[test]

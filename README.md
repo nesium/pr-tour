@@ -128,8 +128,10 @@ tour points at marked, with a list of the steps that point there. `⌘⇧[` and
 The header shows the branch's size, as files changed and lines added and
 removed. **Not in the tour**, after the concerns, lists the changes no step or
 concern points at: files the tour never mentions and hunks no anchor
-overlaps. A tour doesn't have to cover everything (mechanical changes may be
-grouped or left out), but this shows what it left out.
+overlaps; with a valid tour it's empty. The header says how many changes a
+tour leaves out, with **Rewrite the tour** to have the agent write it again
+and cover or skip them. Below it, **Skipped on purpose** lists
+the tour's `skipped` entries with their reasons and the files they match.
 
 Drag the sidebar's edge to resize it; double-click the edge to reset it. The
 view, wrapping, theme and sidebar width are the same in every window, and
@@ -163,8 +165,12 @@ worktrees of a repo share the folder.
 pr-tour validate <tour.json> --repo <repo>
 ```
 
-It checks the format, unique step IDs, hotspots having a `check`, and that
-every anchor's line range overlaps a hunk of `git diff <base_sha> <head_sha>`.
+It checks the format, unique step IDs, hotspots having a `check`, that
+every anchor's line range overlaps a hunk of `git diff <base_sha> <head_sha>`,
+and coverage: every hunk of that diff overlaps an anchor of a step or concern,
+or its file matches an entry of the tour's `skipped` list (a path or glob with
+a reason, for lockfiles, generated files and the like). A `skipped` entry that
+matches no changed file is a problem too.
 It prints `ok: …` and exits 0, or one problem per line and exits 1.
 
 ## Develop

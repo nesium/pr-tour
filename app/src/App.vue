@@ -112,13 +112,43 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         </button>
         <button class="filter" title="Theme: system, light or dark (t)" @click="tour.cycleTheme()">{{ themeLabel }}</button>
       </div>
-      <div v-if="tour.stale.value" class="banner">
-        This tour is for {{ shortCommit(loaded.head_sha) }}; the branch is now at {{ shortCommit(tour.tip.value) }}. Line notes may be off.
+      <div v-if="tour.generation.value.running" class="banner info">
+        <span>Rewriting the tour… {{ tour.generation.value.lines.at(-1) }}</span>
+        <span class="spacer" />
+        <button class="banner-action" @click="tour.stopWriting()">Stop</button>
       </div>
-      <details v-if="tour.problems.value.length" class="banner">
-        <summary>The tour has {{ tour.problems.value.length }} problem{{ tour.problems.value.length === 1 ? "" : "s" }}</summary>
-        <div v-for="problem in tour.problems.value" :key="problem" class="problem">{{ problem }}</div>
-      </details>
+      <div v-else-if="tour.generation.value.failure" class="banner">
+        <span>Rewriting the tour failed: {{ tour.generation.value.failure }}</span>
+        <span class="spacer" />
+        <button class="banner-action" @click="tour.writeTour(true)">Try again</button>
+      </div>
+      <template v-else>
+        <div v-if="tour.stale.value" class="banner">
+          <span>This tour is for {{ shortCommit(loaded.head_sha) }}; the branch is now at {{ shortCommit(tour.tip.value) }}. Line notes may be off.</span>
+          <span class="spacer" />
+          <button class="banner-action" @click="tour.writeTour(false)">Rewrite for {{ shortCommit(tour.tip.value) }}</button>
+        </div>
+        <details v-if="tour.tourProblems.value.length" class="banner">
+          <summary>
+            The tour has {{ tour.tourProblems.value.length }} problem{{ tour.tourProblems.value.length === 1 ? "" : "s" }}
+          </summary>
+          <div v-for="problem in tour.tourProblems.value" :key="problem" class="problem">{{ problem }}</div>
+        </details>
+        <div v-if="tour.coverageGaps.value" class="banner info">
+          <span>
+            {{ tour.coverageGaps.value }} change{{ tour.coverageGaps.value === 1 ? " isn't" : "s aren't" }} in this tour.
+          </span>
+          <button class="banner-link" @click="tour.go('uncovered')">Show them</button>
+          <span class="spacer" />
+          <button class="banner-action" title="Write the tour again, covering or skipping every change" @click="tour.writeTour(true)">
+            Rewrite the tour
+          </button>
+        </div>
+        <div v-else-if="tour.tourProblems.value.length" class="banner">
+          <span class="spacer" />
+          <button class="banner-action" @click="tour.writeTour(true)">Rewrite the tour</button>
+        </div>
+      </template>
     </header>
     <TabBar />
     <!-- The Tour tab stays mounted under a file tab, so coming back keeps its place. -->
@@ -220,6 +250,33 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   font-size: 11px;
   color: var(--blocked);
   background: color-mix(in srgb, var(--blocked) 13%, transparent);
+}
+div.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.banner.info {
+  color: var(--muted);
+  background: var(--raised);
+}
+.banner-action,
+.banner-link {
+  flex: none;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.banner-link {
+  padding: 0;
+  border: 0;
+  color: var(--accent);
 }
 .banner summary {
   cursor: pointer;

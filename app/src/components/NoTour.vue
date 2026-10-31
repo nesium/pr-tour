@@ -18,7 +18,7 @@ async function chooseRepo() {
     <div class="strong">Reviewer's tour</div>
     <div class="muted">{{ tour.status.value }}</div>
     <button v-if="tour.choosing.value" class="button primary" @click="chooseRepo">Choose repository…</button>
-    <button v-if="canWrite" class="button primary" @click="tour.writeTour()">Write the tour</button>
+    <button v-if="canWrite" class="button primary" @click="tour.writeTour(false)">Write the tour</button>
     <div v-if="generation.lines.length || generation.failure" class="log">
       <div v-for="(line, i) in generation.lines" :key="i">{{ line }}</div>
       <div v-if="generation.failure" class="failure">{{ generation.failure }}</div>
@@ -27,7 +27,7 @@ async function chooseRepo() {
       <div class="small dim">Closing this window stops writing the tour.</div>
       <button class="button" @click="tour.stopWriting()">Stop</button>
     </template>
-    <button v-else-if="generation.failure" class="button" @click="tour.writeTour()">Try again</button>
+    <button v-else-if="generation.failure" class="button" @click="tour.writeTour(false)">Try again</button>
   </div>
 </template>
 

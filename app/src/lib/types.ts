@@ -51,6 +51,12 @@ export interface Concern {
   anchor?: Anchor;
 }
 
+/** Something the tour leaves out on purpose; `file` may be a glob. */
+export interface Skipped {
+  file: string;
+  why: string;
+}
+
 export interface Tour {
   version: 1;
   branch: BranchName;
@@ -63,6 +69,7 @@ export interface Tour {
   reading_order: { file: RepoFile; why: string }[];
   steps: Step[];
   concerns: Concern[];
+  skipped?: Skipped[];
 }
 
 export interface Progress {

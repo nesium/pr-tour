@@ -3,7 +3,10 @@
 //! word: the skill and agents act on them.
 
 use crate::types::{CommitId, LineNumber, LineRange, RepoFile, RepoRoot, Side, StepId};
+use crate::glob::FileGlob;
+use crate::stat::parse_numstat;
 use crate::{git, hunks::Covered};
+use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -11,7 +14,7 @@ use tokio::task::JoinSet;
 
 const TOP_LEVEL: &[&str] = &[
     "version", "branch", "base", "base_sha", "head_sha", "author", "created_at", "intent",
-    "reading_order", "steps", "concerns",
+    "reading_order", "steps", "concerns", "skipped",
 ];
 const REQUIRED: &[&str] = &[
     "version", "branch", "base", "base_sha", "head_sha", "intent", "reading_order", "steps",
@@ -29,7 +32,37 @@ struct Anchor {
     lines: LineRange,
 }
 
+/// What is wrong with a tour, and whether the tour is broken or only incomplete.
+#[derive(Clone, Debug, Serialize)]
+pub struct Problem {
+    pub kind: ProblemKind,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProblemKind {
+    /// The tour itself is wrong: its format, or anchors that point at nothing.
+    Tour,
+    /// A change no step, concern or `skipped` entry accounts for.
+    Coverage,
+}
+
+/// Every problem, tour problems first. Messages are written for the agent
+/// that fixes the tour.
+pub async fn problems(tour: &Value, repo: &RepoRoot) -> Vec<Problem> {
+    let mut gaps = Vec::new();
+    let found = check(tour, repo, &mut gaps).await;
+    let problem = |kind| move |message| Problem { kind, message };
+    found.into_iter().map(problem(ProblemKind::Tour)).chain(gaps.into_iter().map(problem(ProblemKind::Coverage))).collect()
+}
+
+/// The problems' messages, one per line of `pr-tour validate`.
 pub async fn validate(tour: &Value, repo: &RepoRoot) -> Vec<String> {
+    problems(tour, repo).await.into_iter().map(|p| p.message).collect()
+}
+
+async fn check(tour: &Value, repo: &RepoRoot, gaps: &mut Vec<String>) -> Vec<String> {
     let mut problems = Vec::new();
     let Some(tour) = tour.as_object() else {
         return vec!["tour must be a JSON object".into()];
@@ -106,7 +139,87 @@ pub async fn validate(tour: &Value, repo: &RepoRoot) -> Vec<String> {
             Err(error) => problems.push(format!("{}: {}: {error}", anchor.label, anchor.file)),
         }
     }
+    let skipped = check_skipped(tour.get("skipped"), &mut problems);
+    let coverage = check_coverage(repo, &base, &head, &anchors, &covered, &skipped).await;
+    problems.extend(coverage.unmatched);
+    gaps.extend(coverage.gaps);
     problems
+}
+
+/// The tour's `skipped` entries that are well formed, each with its label.
+fn check_skipped(skipped: Option<&Value>, problems: &mut Vec<String>) -> Vec<(String, FileGlob)> {
+    let Some(skipped) = skipped else { return Vec::new() };
+    let Some(entries) = skipped.as_array() else {
+        problems.push("skipped must be an array".into());
+        return Vec::new();
+    };
+    let mut globs = Vec::new();
+    for (i, entry) in entries.iter().enumerate() {
+        let place = format!("skipped[{i}]");
+        let Some(entry) = entry.as_object() else {
+            problems.push(format!("{place}: must be an object"));
+            continue;
+        };
+        if let Some(unknown) = unknown_keys(entry, &["file", "why"]) {
+            problems.push(format!("{place}: unknown fields {unknown}"));
+        }
+        if !entry.get("why").and_then(Value::as_str).is_some_and(|w| !w.trim().is_empty()) {
+            problems.push(format!("{place}: needs a why"));
+        }
+        match entry.get("file").and_then(Value::as_str).map(FileGlob::try_from) {
+            Some(Ok(glob)) => globs.push((place, glob)),
+            Some(Err(error)) => problems.push(format!("{place}: {error}")),
+            None => problems.push(format!("{place}: needs a file")),
+        }
+    }
+    globs
+}
+
+struct Coverage {
+    /// `skipped` entries that match no changed file: mistakes in the tour.
+    unmatched: Vec<String>,
+    /// Changes nothing accounts for.
+    gaps: Vec<String>,
+}
+
+/// Every change is in a step, a concern or `skipped`: each changed file that
+/// nothing skips has an anchor in every hunk.
+async fn check_coverage(
+    repo: &RepoRoot,
+    base: &CommitId,
+    head: &CommitId,
+    anchors: &[Anchor],
+    covered: &HashMap<RepoFile, Result<Covered, String>>,
+    skipped: &[(String, FileGlob)],
+) -> Coverage {
+    let mut coverage = Coverage { unmatched: Vec::new(), gaps: Vec::new() };
+    // Renames count as a removal and an addition, as the per-file diffs show them.
+    let args = ["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", base.as_str(), head.as_str()];
+    let changed: Vec<RepoFile> = match git::text(repo.as_path(), &args).await {
+        Ok(numstat) => parse_numstat(&numstat).into_iter().map(|stat| stat.file).collect(),
+        Err(error) => {
+            coverage.unmatched.push(format!("coverage: {error}"));
+            return coverage;
+        }
+    };
+    for (place, glob) in skipped {
+        if !changed.iter().any(|file| glob.matches(file)) {
+            coverage.unmatched.push(format!("{place}: {glob} matches no changed file"));
+        }
+    }
+    for file in changed.iter().filter(|file| !skipped.iter().any(|(_, glob)| glob.matches(file))) {
+        let lines: Vec<(Side, LineRange)> = anchors.iter().filter(|a| a.file == *file).map(|a| (a.side, a.lines)).collect();
+        if lines.is_empty() {
+            coverage.gaps.push(format!("{file}: changed, but no step or concern points into it; anchor it or list it in skipped"));
+            continue;
+        }
+        if let Some(Ok(hunks)) = covered.get(file) {
+            for header in hunks.uncovered(&lines) {
+                coverage.gaps.push(format!("{file}: hunk {header} is in no step or concern; anchor it or list the file in skipped"));
+            }
+        }
+    }
+    coverage
 }
 
 fn check_steps(steps: &[Value], anchors: &mut Vec<Anchor>, problems: &mut Vec<String>) {
@@ -287,10 +400,10 @@ pub fn summary(tour: &Value) -> String {
     format!("ok: {} steps ({closely} read closely), {concerns} concerns", steps.len())
 }
 
-pub async fn validate_file(tour: &Path, repo: &RepoRoot) -> Result<(Value, Vec<String>), String> {
+pub async fn validate_file(tour: &Path, repo: &RepoRoot) -> Result<(Value, Vec<Problem>), String> {
     let text = tokio::fs::read_to_string(tour).await.map_err(|e| format!("cannot read tour: {e}"))?;
     let tour: Value = serde_json::from_str(&text).map_err(|e| format!("cannot read tour: {e}"))?;
-    let problems = validate(&tour, repo).await;
+    let problems = problems(&tour, repo).await;
     Ok((tour, problems))
 }
 
@@ -330,7 +443,7 @@ pub fn cli(args: &[String]) -> i32 {
             0
         }
         Ok((_, problems)) => {
-            problems.iter().for_each(|p| println!("{p}"));
+            problems.iter().for_each(|p| println!("{}", p.message));
             1
         }
     }

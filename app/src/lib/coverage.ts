@@ -1,5 +1,11 @@
 import type { Hunk } from "./diff";
-import type { Anchor, HunkIndex, RepoFile, Tour } from "./types";
+import { globMatches } from "./glob";
+import type { Anchor, HunkIndex, RepoFile, Skipped, Tour } from "./types";
+
+/** The `skipped` entry that leaves `file` out of the tour, if any. */
+export function skippedBy(tour: Tour, file: RepoFile): Skipped | undefined {
+  return tour.skipped?.find((s) => globMatches(s.file, file));
+}
 
 /** Every anchor in the tour that points into `file`, steps and concerns alike. */
 export function anchorsIn(tour: Tour, file: RepoFile): Anchor[] {

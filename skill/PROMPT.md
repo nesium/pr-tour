@@ -21,20 +21,35 @@ One JSON document that validates against `tour.schema.json`. Nothing else.
     close reading, the steps are too fine; merge them.
   - Group mechanical changes into one `skim` step with several anchors instead
     of one step each.
-  - Skip pure deletions unless the deletion is itself a decision.
+  - Leave pure deletions out of the steps unless the deletion is itself a
+    decision; list them in `skipped`.
   - Mark 2-3 steps `hotspot: true` and give each a `check`: the concrete thing
     to verify, phrased so the reviewer can answer yes or no.
   - `why` explains why the change exists, not what the diff already shows.
 - `concerns`: anything uncertain, risky or unverified. Short. Not a bug hunt.
+- `skipped`: what the tour leaves out on purpose, so the reviewer knows it
+  wasn't missed. Each entry is a `file` (a path, or a glob such as
+  `icons/**` or `**/*.lock`) and `why`. Skip only what needs no review:
+  lockfiles, generated files, binary assets, pure deletions, renames. One
+  entry can cover many files.
+
+## Coverage
+
+Every change must be accounted for: each hunk of `git diff <base_sha>
+<head_sha>` overlaps an anchor of some step or concern, or its file matches a
+`skipped` entry. A file that is skipped can still be anchored where it matters.
+Changes a reviewer should at least glance at belong in a `skim` step, not in
+`skipped`.
 
 ## Anchors
 
 Line numbers refer to `head_sha` (`side: "new"`), or to `base_sha` for removed
 code (`side: "old"`). Each anchor must overlap a hunk of
-`git diff <base_sha> <head_sha> -- <file>`. `pr-tour validate` checks this; run
-it before you finish.
+`git diff <base_sha> <head_sha> -- <file>`. `pr-tour validate` checks this and
+the coverage; run it before you finish.
 
 ## Keep it lean
 
-If explaining everything produces noise, explain less. A short tour that points
-at the three places that matter beats a complete one.
+If explaining everything produces noise, explain less: group, skim or skip
+instead. A short tour that points at the three places that matter beats a long
+one, as long as it says what it leaves out.

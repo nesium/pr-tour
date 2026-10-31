@@ -1,6 +1,7 @@
 mod commands;
 mod generate;
 mod git;
+mod glob;
 mod hunks;
 mod launch_lock;
 mod locate;

@@ -171,7 +171,7 @@ pub async fn open(app: &AppHandle, request: OpenRequest) -> Result<(), String> {
         let _ = start.close();
     }
     if request.generate && waiting {
-        start_generation(app, &label)?;
+        start_generation(app, &label, false)?;
     }
     Ok(())
 }
@@ -210,7 +210,9 @@ fn watch(app: &AppHandle, label: &WindowLabel, tour: &TourPath) -> Result<Recomm
     Ok(watcher)
 }
 
-pub fn start_generation(app: &AppHandle, label: &WindowLabel) -> Result<(), String> {
+/// Writes the window's tour. `force` rewrites one that already covers the
+/// branch's commit, e.g. to cover changes it left out.
+pub fn start_generation(app: &AppHandle, label: &WindowLabel, force: bool) -> Result<(), String> {
     let windows = app.state::<Windows>();
     let mut tours = windows.tours.lock().unwrap();
     let window = tours.get_mut(label).ok_or("this window has no tour")?;
@@ -222,7 +224,7 @@ pub fn start_generation(app: &AppHandle, label: &WindowLabel) -> Result<(), Stri
         branch: Some(window.located.branch.clone()),
         base: None,
         agent: AgentChoice::Newest,
-        force: false,
+        force,
         output: Some(window.located.path.clone()),
     };
     window.generation = GenerationState { running: true, lines: vec!["Looking for the session that knows this branch…".into()], failure: None };

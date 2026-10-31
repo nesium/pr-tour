@@ -34,10 +34,10 @@ pub async fn read_tour(path: TourPath) -> TourFile {
 }
 
 #[tauri::command]
-pub async fn validate_tour(root: RepoRoot, path: TourPath) -> Vec<String> {
+pub async fn validate_tour(root: RepoRoot, path: TourPath) -> Vec<validate::Problem> {
     match validate::validate_file(path.as_path(), &root).await {
         Ok((_, problems)) => problems,
-        Err(error) => vec![error],
+        Err(message) => vec![validate::Problem { kind: validate::ProblemKind::Tour, message }],
     }
 }
 
@@ -74,8 +74,8 @@ pub fn generation_state(window: Window, windows: State<Windows>) -> GenerationSt
 }
 
 #[tauri::command]
-pub fn start_generation(app: AppHandle, window: Window) -> Result<(), String> {
-    windows::start_generation(&app, &WindowLabel::of(&window))
+pub fn start_generation(app: AppHandle, window: Window, force: bool) -> Result<(), String> {
+    windows::start_generation(&app, &WindowLabel::of(&window), force)
 }
 
 #[tauri::command]
@@ -96,3 +96,4 @@ pub async fn diff_stat(root: RepoRoot, base: CommitId, head: CommitId) -> Result
     let args = ["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", base.as_str(), head.as_str()];
     Ok(stat::parse_numstat(&git::text(root.as_path(), &args).await?))
 }
+

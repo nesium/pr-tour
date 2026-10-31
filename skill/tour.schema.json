@@ -67,6 +67,19 @@
           "anchor": { "$ref": "#/$defs/anchor" }
         }
       }
+    },
+    "skipped": {
+      "type": "array",
+      "description": "What the tour leaves out on purpose. Every change is in a step, a concern, or here.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "why"],
+        "properties": {
+          "file": { "type": "string", "description": "A repo-relative path, or a glob: * within a folder, ** across folders, ? one character." },
+          "why": { "type": "string", "description": "Why it needs no review, e.g. generated, lockfile, binary asset." }
+        }
+      }
     }
   },
   "$defs": {

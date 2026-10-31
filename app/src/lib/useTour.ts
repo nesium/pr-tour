@@ -1,6 +1,6 @@
 import { computed, reactive, ref, shallowReactive, shallowRef, watch, type InjectionKey } from "vue";
-import { api, type FileDiff, type FileStat, type GenerationState, type Located } from "./api";
-import { anchorsIn, uncoveredHunks } from "./coverage";
+import { api, type FileDiff, type FileStat, type GenerationState, type Located, type Problem } from "./api";
+import { anchorsIn, skippedBy, uncoveredHunks } from "./coverage";
 import { anchorWindow, parseFile, type DiffWindow, type ParsedDiff, type Row } from "./diff";
 import type { HighlightedLines } from "./highlight";
 import { highlightFile } from "./highlighter";
@@ -37,7 +37,11 @@ export function createTourState() {
   // Tours never change in place: a new file means a new object, so nothing inside needs tracking.
   const tour = shallowRef<Tour | null>(null);
   const tip = ref<CommitId | null>(null);
-  const problems = ref<string[]>([]);
+  const problems = ref<Problem[]>([]);
+  /** The tour itself is wrong; the reviewer should know, the agent should fix it. */
+  const tourProblems = computed(() => problems.value.filter((p) => p.kind === "tour").map((p) => p.message));
+  /** Changes the tour doesn't account for; "Not in the tour" shows them. */
+  const coverageGaps = computed(() => problems.value.filter((p) => p.kind === "coverage").length);
   const closelyOnly = ref(false);
   const progress = ref<Progress>({ done: {}, current: "overview" });
   // Parsed diffs can hold thousands of rows each; only the map itself is reactive.
@@ -179,6 +183,7 @@ export function createTourState() {
     const reviewed = tour.value;
     if (!reviewed || !stat.value) return null;
     return stat.value.flatMap((entry) => {
+      if (skippedBy(reviewed, entry.file)) return [];
       const anchors = anchorsIn(reviewed, entry.file);
       const state = diffs.get(entry.file);
       if (anchors.length === 0) return [{ ...entry, hunks: state?.status === "ready" ? state.diff.hunks.map((_, i) => i as HunkIndex) : null }];
@@ -332,8 +337,9 @@ export function createTourState() {
     }
   }
 
-  function writeTour() {
-    void api.startGeneration().catch((e) => (generation.value = { running: false, lines: [], failure: String(e) }));
+  /** `rewrite` replaces a tour that already covers the branch's commit. */
+  function writeTour(rewrite = false) {
+    void api.startGeneration(rewrite).catch((e) => (generation.value = { running: false, lines: [], failure: String(e) }));
   }
 
   watch([current, stat], ([entry]) => {
@@ -343,7 +349,8 @@ export function createTourState() {
   });
 
   /** The files the uncovered page shows whole, which nothing else loads. */
-  const uncoveredFiles = () => (stat.value ?? []).map((s) => s.file).filter((f) => tour.value && anchorsIn(tour.value, f).length === 0);
+  const uncoveredFiles = () =>
+    (stat.value ?? []).map((s) => s.file).filter((f) => tour.value && !skippedBy(tour.value, f) && anchorsIn(tour.value, f).length === 0);
 
   return {
     status,
@@ -374,7 +381,8 @@ export function createTourState() {
     nextMatch,
     tip,
     stale,
-    problems,
+    tourProblems,
+    coverageGaps,
     closelyOnly,
     progress,
     diffs,

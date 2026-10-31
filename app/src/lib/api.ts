@@ -7,6 +7,12 @@ import type { BranchName, CommitId, LockPath, RepoFile, RepoRoot, TourPath, Tour
 export type WindowContent = { kind: "tour"; located: Located } | { kind: "start"; message: string | null };
 
 /** One changed file's size; null counts for a binary file. */
+/** "tour": the tour is broken. "coverage": a change it doesn't account for. Messages are written for the agent. */
+export interface Problem {
+  kind: "tour" | "coverage";
+  message: string;
+}
+
 export interface FileStat {
   file: RepoFile;
   added: number | null;
@@ -44,10 +50,11 @@ export const api = {
   windowContent: () => invoke<WindowContent>("window_content"),
   openRepo: (repo: string) => invoke<void>("open_repo", { repo }),
   generationState: () => invoke<GenerationState>("generation_state"),
-  startGeneration: () => invoke<void>("start_generation"),
+  /** `force` rewrites a tour that already covers the branch's commit. */
+  startGeneration: (force: boolean) => invoke<void>("start_generation", { force }),
   cancelGeneration: () => invoke<void>("cancel_generation"),
   readTour: (path: TourPath) => invoke<TourFile>("read_tour", { path }),
-  validateTour: (root: RepoRoot, path: TourPath) => invoke<string[]>("validate_tour", { root, path }),
+  validateTour: (root: RepoRoot, path: TourPath) => invoke<Problem[]>("validate_tour", { root, path }),
   branchTip: (root: RepoRoot, branch: BranchName) => invoke<CommitId | null>("branch_tip", { root, branch }),
   diffStat: (root: RepoRoot, base: CommitId, head: CommitId) => invoke<FileStat[]>("diff_stat", { root, base, head }),
   fileDiff: (root: RepoRoot, base: CommitId, head: CommitId, file: RepoFile) => invoke<FileDiff>("file_diff", { root, base, head, file }),
