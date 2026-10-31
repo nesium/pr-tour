@@ -100,6 +100,9 @@ struct TourWindow {
 pub struct Windows {
     tours: Mutex<HashMap<WindowLabel, TourWindow>>,
     start_message: Mutex<Option<String>>,
+    /// One open at a time: between finding no window and creating one, another
+    /// open of the same tour would create a second.
+    opening: tokio::sync::Mutex<()>,
 }
 
 /// What a window shows, asked by its webview when it loads.
@@ -143,6 +146,8 @@ pub async fn open_or_explain(app: &AppHandle, request: Option<OpenRequest>) {
 }
 
 pub async fn open(app: &AppHandle, request: OpenRequest) -> Result<(), String> {
+    let windows = app.state::<Windows>();
+    let _opening = windows.opening.lock().await;
     let located = locate::locate(&request.repo, request.branch, request.tour).await?;
     let label = WindowLabel::for_tour(&located.path);
     let title = format!("Tour · {}", located.branch);

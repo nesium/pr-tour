@@ -2,6 +2,7 @@ mod commands;
 mod generate;
 mod git;
 mod hunks;
+mod launch_lock;
 mod locate;
 mod types;
 pub mod validate;
@@ -11,10 +12,13 @@ use tauri::{Manager, WindowEvent};
 use windows::{OpenRequest, WindowLabel, Windows};
 
 pub use generate::cli as generate_cli;
+pub use launch_lock::LaunchLock;
 
 /// Runs the app for `args` (see [`OpenRequest`]). A second launch hands its
-/// arguments to the running app and exits.
-pub fn run(args: Vec<String>) {
+/// arguments to the running app and exits. `starting` is released once this
+/// app is the one others hand over to.
+pub fn run(args: Vec<String>, starting: LaunchLock) {
+    let mut starting = Some(starting);
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             let request = OpenRequest::from_args(argv.get(1..).unwrap_or_default(), cwd.as_ref());
@@ -25,6 +29,8 @@ pub fn run(args: Vec<String>) {
         .plugin(tauri_plugin_dialog::init())
         .manage(Windows::default())
         .setup(move |app| {
+            // Plugins have run: the single-instance socket is bound.
+            drop(starting.take());
             let cwd = std::env::current_dir().unwrap_or_default();
             let request = OpenRequest::from_args(&args, &cwd);
             let app = app.handle().clone();

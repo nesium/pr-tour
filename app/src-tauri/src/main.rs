@@ -14,7 +14,7 @@ fn main() {
         Some("generate") => std::process::exit(pr_tour_lib::generate_cli(rest)),
         Some("open") => std::process::exit(open_detached(rest)),
         Some("-h" | "--help" | "help") => println!("{USAGE}"),
-        _ => pr_tour_lib::run(args),
+        _ => pr_tour_lib::run(args, pr_tour_lib::LaunchLock::acquire()),
     }
 }
 
