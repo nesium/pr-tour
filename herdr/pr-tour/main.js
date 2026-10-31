@@ -8,6 +8,13 @@ const MAX_ROWS = 400;
 const CONTEXT = 3;
 const EXPAND_STEP = 20;
 const FOLD_AFTER = 8;
+// Herdr stops a render that runs too long, then waits ~16 s before trying again. Right after
+// a tab opens, scripts run far slower than usual, so a render that normally takes a few ms
+// can hit that limit. Past this budget, the remaining diffs render as placeholders and
+// another render is scheduled.
+const RENDER_BUDGET_MS = 60;
+// Diff rows the first render after a load may draw; each follow-up render doubles it.
+const FIRST_ROW_CAP = 40;
 const short = (sha) => (sha ?? "").slice(0, 7);
 const tourFileName = (branch) => `${branch.replaceAll("/", "__")}.json`;
 
@@ -91,6 +98,13 @@ export default class PrTour extends View {
     this.closelyOnly = false;
     this.status = "Looking for a tour…";
     this.locate(cx);
+    // Finishes a page that ran out of render budget, with a larger row cap each time.
+    cx.timer.every(150, (cx) => {
+      if (!this.deferred) return;
+      this.deferred = false;
+      this.rowCap = (this.rowCap ?? FIRST_ROW_CAP) * 2;
+      cx.notify();
+    });
     cx.spawn(async (cx) => {
       const keys = { next: "j", prev: "k", reviewed: "space", filter: "f" };
       for (;;) {
@@ -146,6 +160,7 @@ export default class PrTour extends View {
     this.tour = tour;
     this.diffs = {};
     this.windows = {};
+    this.rowCap = FIRST_ROW_CAP;
     const tip = await exec("git", [...READ, "rev-parse", tour.branch ?? this.branch], { cwd: this.root });
     this.tip = tip.code === 0 ? tip.stdout.trim() : null;
     const files = new Set([...tour.steps.flatMap((s) => s.anchors.map((a) => a.file)), ...tour.concerns.filter((c) => c.anchor).map((c) => c.anchor.file)]);
@@ -251,16 +266,15 @@ export default class PrTour extends View {
     ]);
   }
 
+  // Three elements per row (the render budget is tight): the line, one gutter with both
+  // numbers (GitHub colors both columns alike; the anchor marker is its left border), the code.
   diffRow(row, anchor, g) {
     const hit = inAnchor(row, anchor), tone = row.kind === "+" ? g.add : row.kind === "-" ? g.del : null;
-    const number = (n) => div().w(44).h_full().flex_none().pr(8).flex().items_center().justify_end().text_color(g.muted)
-      .when(Boolean(tone), (e) => e.bg(tone.num)).child(n === undefined ? "" : String(n));
+    const numbers = String(row.old ?? "").padStart(5) + String(row.new ?? "").padStart(6);
     return h_flex().w_full().h(20).flex_none().items_center().when(Boolean(tone), (e) => e.bg(tone.line))
-      .child(div().w(3).h_full().flex_none().when(hit, (e) => e.bg(g.selected)))
-      .child(number(row.old))
-      .child(number(row.new))
-      .child(div().w(22).flex_none().text_center().text_color(tone ? tone.sign : g.muted).child(row.kind === " " ? "" : row.kind))
-      .child(div().flex_1().min_w(0).pr(10).truncate().text_color(g.fg).child(row.text));
+      .child(div().w(91).h_full().flex_none().flex().items_center().justify_end().pr(8).border_l(3)
+        .border_color(hit ? g.selected : "#00000000").text_color(g.muted).when(Boolean(tone), (e) => e.bg(tone.num)).child(numbers))
+      .child(div().flex_1().min_w(0).pl(8).pr(10).truncate().text_color(g.fg).child(`${row.kind === " " ? " " : row.kind} ${row.text}`));
   }
 
   anchorView(anchor, key, t) {
@@ -270,7 +284,7 @@ export default class PrTour extends View {
       .child(h_flex().h(36).px(12).gap(10).items_center().bg(g.header).border_b(1).border_color(g.border)
         .child(div().flex_1().min_w(0).truncate().font_family(settings().font_family ?? "JetBrains Mono").text_size(12).font_semibold().text_color(g.fg).child(anchor.file))
         .child(div().flex_none().text_size(11).text_color(g.muted).child(anchor.side === "old" ? `${range} (removed)` : range)));
-    if (!diff) return box.child(div().p(12).text_color(g.muted).child("Loading diff…"));
+    if (!diff || this.overBudget()) return box.child(div().p(12).text_color(g.muted).child("Loading diff…"));
     if (diff.error) return box.child(div().p(12).text_color(g.del.sign).child(diff.error));
     const { rows, hunks } = diff;
     const window = this.windowFor(key, rows, anchor);
@@ -296,6 +310,12 @@ export default class PrTour extends View {
         i = end;
         continue;
       }
+      if (this.rowsLeft <= 0 || this.overBudget()) {
+        this.deferred = true;
+        code.child(div().px(12).py(6).text_color(g.muted).child("Loading…"));
+        return box.child(code);
+      }
+      this.rowsLeft--;
       code.child(this.diffRow(row, anchor, g));
       shown++;
     }
@@ -309,9 +329,12 @@ export default class PrTour extends View {
   // The rows an anchor shows: its own lines plus CONTEXT on each side, widened by the expanders.
   windowFor(key, rows, anchor) {
     if (this.windows[key]) return this.windows[key];
-    const hits = rows.flatMap((r, i) => (inAnchor(r, anchor) ? [i] : []));
-    if (!hits.length) return null;
-    const window = { lo: Math.max(0, hits[0] - CONTEXT), hi: Math.min(rows.length - 1, hits[hits.length - 1] + CONTEXT), open: {} };
+    let first = -1, last = -1;
+    for (let i = 0; i < rows.length; i++) {
+      if (inAnchor(rows[i], anchor)) { if (first < 0) first = i; last = i; }
+    }
+    if (first < 0) return null;
+    const window = { lo: Math.max(0, first - CONTEXT), hi: Math.min(rows.length - 1, last + CONTEXT), open: {} };
     this.windows[key] = window;
     return window;
   }
@@ -376,7 +399,16 @@ export default class PrTour extends View {
       .when(Boolean(step), (e) => e.child(this.button("done", done ? "✓ Reviewed" : "Mark reviewed", () => this.toggleDone(step.id), t, !done)));
   }
 
+  overBudget() {
+    if (Date.now() - this.renderStarted <= RENDER_BUDGET_MS) return false;
+    this.deferred = true;
+    return true;
+  }
+
   render(cx) {
+    this.renderStarted = Date.now();
+    this.deferred = false;
+    this.rowsLeft = this.rowCap ?? FIRST_ROW_CAP;
     const t = theme();
     const root = v_flex().id("pr-tour").size_full().min_h(0).bg(t.background).text_color(t.foreground).text_size(13)
       .track_focus(this.handle).on_key_down((e, cx) => this.tour && this.onKey(e, cx))
@@ -386,11 +418,12 @@ export default class PrTour extends View {
       .child(div().text_color(t.muted).text_center().child(this.status)));
     const current = this.entries().find((e) => e.id === this.progress().current) ?? this.entries()[0];
     const body = current.id === "overview" ? this.overview(t) : current.id === "concerns" ? this.concerns(t) : this.stepView(current.step, t);
-    return root
+    const page = root
       .child(this.header(t))
       .child(h_flex().flex_1().min_h(0)
         .child(this.sidebar(t))
         .child(v_flex().id(`detail-${current.id}`).flex_1().min_w(0).h_full().overflow_y_scrollbar().p(18).child(body)))
       .child(this.footer(t));
+    return page;
   }
 }
