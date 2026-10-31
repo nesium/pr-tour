@@ -24,6 +24,10 @@ export type HighlightKey = Brand<string, "HighlightKey">;
 /** One tour of one commit in one repository; review progress is stored under it. */
 export type ProgressKey = Brand<string, "ProgressKey">;
 
+/** One question in a tour's answers file. */
+export type AnswerId = Brand<string, "AnswerId">;
+export type SessionId = Brand<string, "SessionId">;
+
 export type Side = "old" | "new";
 export type StepTag = "read_closely" | "skim";
 /** "uncovered" lists the changes no step or concern points at. */
@@ -70,6 +74,24 @@ export interface Tour {
   steps: Step[];
   concerns: Concern[];
   skipped?: Skipped[];
+}
+
+export interface AnswerEntry {
+  id: AnswerId;
+  step: StepId;
+  /** The commit the tour was for when asked; answers about an older tour aren't shown. */
+  head_sha: CommitId;
+  question: string;
+  status: "pending" | "done" | "error";
+  asked_at: string;
+  answer?: string;
+  answered_at?: string;
+}
+
+export interface Answers {
+  version: number;
+  session?: SessionId;
+  entries: AnswerEntry[];
 }
 
 export interface Progress {

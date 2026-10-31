@@ -12,10 +12,12 @@ export interface Preferences {
   theme: ThemeChoice;
   /** In CSS pixels, within SIDEBAR_WIDTH. */
   sidebarWidth: number;
+  /** Whether the chat panel on the right of the Tour tab is open. */
+  chatOpen: boolean;
 }
 
 export const SIDEBAR_WIDTH = { min: 180, max: 520 };
-export const DEFAULT_PREFERENCES: Preferences = { diffView: "unified", wrap: false, theme: "system", sidebarWidth: 250 };
+export const DEFAULT_PREFERENCES: Preferences = { diffView: "unified", wrap: false, theme: "system", sidebarWidth: 250, chatOpen: true };
 
 const KEY = "preferences";
 

@@ -6,19 +6,21 @@
 //! one. The agent can only read; this module fills in the branch facts,
 //! validates the tour against the real diff and writes it.
 
+pub mod ask;
 mod facts;
 mod lock;
 mod prompt;
 mod sessions;
 
-use crate::types::{BranchName, CommitId, SessionId, TourPath};
+use crate::types::{BranchName, CommitId, RepoRoot, SessionId, TourPath};
+use serde::Serialize;
 use crate::validate;
 use facts::Facts;
-use prompt::Agent;
+use prompt::{Agent, Reply};
 use serde_json::{json, Value};
 use sessions::Session;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -99,7 +101,7 @@ pub async fn plan(request: &Request) -> Result<Plan, Failure> {
         }
     };
     let prompt = prompt::build(&facts, session.is_some()).await?;
-    let argv = prompt::claude_argv(session.as_ref().map_or(Agent::Fresh, |s| Agent::Fork(&s.id)))?;
+    let argv = prompt::claude_argv(session.as_ref().map_or(Agent::Fresh, |s| Agent::Fork(&s.id)), Reply::Tour)?;
     let existing = tokio::fs::read_to_string(&facts.tour_path).await.ok();
     let existing_head = existing.and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|t| t.get("head_sha").cloned());
     let up_to_date = existing_head.is_some_and(|head| head == facts.head_sha.as_str());
@@ -113,9 +115,9 @@ pub async fn generate(request: &Request, progress: impl Fn(String)) -> Result<Ou
     if plan.up_to_date && !request.force {
         return Ok(Outcome::UpToDate { path: facts.tour_path.clone(), head: facts.head_sha.clone() });
     }
-    let _lock = lock::Lock::take(&facts.tour_path)?;
+    let _lock = lock::Lock::take(facts.tour_path.lock(), "a tour for this branch is already being written")?;
     progress(format!("Writing the tour with {}…", sessions::describe(plan.session.as_ref())));
-    let output = run_claude(&plan.argv, &plan.prompt, facts).await?;
+    let output = run_claude(&plan.argv, &plan.prompt, &facts.root, Reply::Tour).await?;
     let own_session = output["session_id"].as_str().and_then(|s| SessionId::try_from(s).ok()).ok_or("claude returned no session id")?;
     let mut tour = with_facts(output, facts, &own_session);
     let mut problems = validate::validate(&tour, &facts.root).await;
@@ -123,22 +125,22 @@ pub async fn generate(request: &Request, progress: impl Fn(String)) -> Result<Ou
         progress(format!("The tour has {} problems; asking for a fix…", problems.len()));
         let list: Vec<String> = problems.iter().map(|p| format!("- {p}")).collect();
         let fix = format!("The tour has these problems. Fix them and answer with the whole corrected tour:\n\n{}", list.join("\n"));
-        let output = run_claude(&prompt::claude_argv(Agent::Continue(&own_session))?, &fix, facts).await?;
+        let output = run_claude(&prompt::claude_argv(Agent::Continue(&own_session), Reply::Tour)?, &fix, &facts.root, Reply::Tour).await?;
         tour = with_facts(output, facts, &own_session);
         problems = validate::validate(&tour, &facts.root).await;
         if !problems.is_empty() {
             return Err(Failure(format!("the tour is still invalid after one fix; nothing was written:\n{}", problems.join("\n"))));
         }
     }
-    write_atomically(&facts.tour_path, &tour)?;
+    write_json(facts.tour_path.as_path(), &tour)?;
     let summary = validate::summary(&tour).trim_start_matches("ok: ").to_owned();
     Ok(Outcome::Written { path: facts.tour_path.clone(), summary })
 }
 
-async fn run_claude(argv: &[String], prompt: &str, facts: &Facts) -> Result<Value, Failure> {
+async fn run_claude(argv: &[String], prompt: &str, root: &RepoRoot, reply: Reply) -> Result<Value, Failure> {
     let mut child = Command::new(&argv[0])
         .args(&argv[1..])
-        .current_dir(facts.root.as_path())
+        .current_dir(root.as_path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -162,14 +164,19 @@ async fn run_claude(argv: &[String], prompt: &str, facts: &Facts) -> Result<Valu
         let code = finished.status.code().map_or_else(|| "a signal".to_owned(), |c| c.to_string());
         return Err(Failure(format!("claude exited with {code}: {}", shown.chars().take(500).collect::<String>())));
     };
-    if output["is_error"].as_bool() == Some(true) || output["structured_output"].is_null() {
+    let missing = match reply {
+        Reply::Tour => output["structured_output"].is_null(),
+        Reply::Text => !output["result"].as_str().is_some_and(|r| !r.trim().is_empty()),
+    };
+    if output["is_error"].as_bool() == Some(true) || missing {
         let result = match &output["result"] {
             Value::Null => "None".to_owned(),
             Value::String(s) => s.clone(),
             other => other.to_string(),
         };
         let subtype = output["subtype"].as_str().unwrap_or("None");
-        return Err(Failure(format!("claude returned no tour ({subtype}): {}", result.chars().take(500).collect::<String>())));
+        let wanted = if reply == Reply::Tour { "tour" } else { "answer" };
+        return Err(Failure(format!("claude returned no {wanted} ({subtype}): {}", result.chars().take(500).collect::<String>())));
     }
     Ok(output)
 }
@@ -188,12 +195,13 @@ fn with_facts(output: Value, facts: &Facts, session: &SessionId) -> Value {
     tour
 }
 
-fn write_atomically(path: &TourPath, tour: &Value) -> Result<(), Failure> {
-    let folder = path.as_path().parent().ok_or("tour has no folder")?;
-    let fail = |e: std::io::Error| Failure(format!("cannot write {path}: {e}"));
+/// Replaces the file in one step, so readers never see half of it.
+fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Failure> {
+    let folder = path.parent().ok_or("file has no folder")?;
+    let fail = |e: std::io::Error| Failure(format!("cannot write {}: {e}", path.display()));
     std::fs::create_dir_all(folder).map_err(fail)?;
     let mut temporary = tempfile::Builder::new().prefix(".tour-").suffix(".json").tempfile_in(folder).map_err(fail)?;
-    let text = serde_json::to_string_pretty(tour).map_err(|e| Failure(e.to_string()))?;
+    let text = serde_json::to_string_pretty(value).map_err(|e| Failure(e.to_string()))?;
     writeln!(temporary, "{text}").map_err(fail)?;
     temporary.persist(path).map_err(|e| fail(e.error))?;
     Ok(())

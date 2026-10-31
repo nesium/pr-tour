@@ -78,12 +78,23 @@ pub enum Agent<'a> {
     Continue(&'a SessionId),
 }
 
-pub fn claude_argv(agent: Agent) -> Result<Vec<String>, Failure> {
-    let mut schema: Value = serde_json::from_str(&schema()).map_err(|e| Failure(format!("tour.schema.json: {e}")))?;
-    // Claude Code's validator rejects the 2020-12 meta-schema URL and unknown formats.
-    strip_keys(&mut schema, &["$schema", "format"]);
-    let mut argv: Vec<String> = ["claude", "-p", "--output-format", "json", "--json-schema"].map(String::from).into();
-    argv.push(schema.to_string());
+/// What the agent answers with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Reply {
+    /// A tour, held to tour.schema.json.
+    Tour,
+    /// Markdown text, e.g. the answer to a question.
+    Text,
+}
+
+pub fn claude_argv(agent: Agent, reply: Reply) -> Result<Vec<String>, Failure> {
+    let mut argv: Vec<String> = ["claude", "-p", "--output-format", "json"].map(String::from).into();
+    if reply == Reply::Tour {
+        let mut schema: Value = serde_json::from_str(&schema()).map_err(|e| Failure(format!("tour.schema.json: {e}")))?;
+        // Claude Code's validator rejects the 2020-12 meta-schema URL and unknown formats.
+        strip_keys(&mut schema, &["$schema", "format"]);
+        argv.extend(["--json-schema".to_owned(), schema.to_string()]);
+    }
     argv.extend(["--permission-mode", "dontAsk", "--allowedTools", READ_ONLY_TOOLS].map(String::from));
     match agent {
         Agent::Fresh => {}
@@ -118,6 +129,7 @@ mod tests {
 
     #[test]
     fn the_built_in_schema_parses() {
-        assert!(claude_argv(Agent::Fresh).is_ok());
+        assert!(claude_argv(Agent::Fresh, Reply::Tour).is_ok());
+        assert!(!claude_argv(Agent::Fresh, Reply::Text).unwrap().contains(&"--json-schema".to_owned()));
     }
 }

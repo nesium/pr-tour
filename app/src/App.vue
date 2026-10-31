@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref } from "vue";
+import ChatPanel from "./components/ChatPanel.vue";
 import ConcernsPage from "./components/ConcernsPage.vue";
 import DiffSize from "./components/DiffSize.vue";
 import FileView from "./components/FileView.vue";
@@ -72,6 +73,7 @@ function onKey(event: KeyboardEvent) {
       tour.move(1);
     },
     f: () => tour.toggleFilter(),
+    a: () => tour.toggleChat(),
     "/": () => sidebar.value?.focusSearch(),
   };
   const action = actions[event.key];
@@ -161,12 +163,16 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
           <UncoveredPage v-else-if="tour.current.value?.id === 'uncovered'" />
           <StepPage v-else-if="currentStep" :step="currentStep" />
         </main>
+        <ChatPanel v-if="tour.preferences.value.chatOpen" />
       </div>
       <footer class="bottom">
         <button class="button" @click="tour.move(-1)">← Prev</button>
         <button class="button" @click="tour.move(1)">Next →</button>
         <span class="small muted">{{ reviewedCount }}/{{ loaded.steps.length }} reviewed</span>
-        <span class="spacer small dim">j/k move · space reviewed + next · f filter · s split · w wrap · t theme · / search · ⌘⇧[ ] tabs</span>
+        <span class="spacer small dim">j/k move · space reviewed + next · f filter · s split · w wrap · t theme · a ask · / search · ⌘⇧[ ] tabs</span>
+        <button class="button" :class="{ on: tour.preferences.value.chatOpen }" title="Show or hide the chat (a)" @click="tour.toggleChat()">
+          {{ tour.preferences.value.chatOpen ? "Ask ⇥" : "⇤ Ask" }}
+        </button>
         <button v-if="currentStep" class="button" :class="{ primary: !currentDone }" @click="tour.toggleDone(currentStep.id)">
           {{ currentDone ? "✓ Reviewed" : "Mark reviewed" }}
         </button>

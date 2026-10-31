@@ -1,15 +1,15 @@
 use super::Failure;
-use crate::types::{LockPath, TourPath};
+use crate::types::LockPath;
 use std::fs::OpenOptions;
 use std::io::Write;
 
-/// One generation per tour file at a time; held while the tour is written and
-/// removed when dropped. A lock left by a dead process is taken over.
+/// One holder at a time, e.g. one generation per tour; removed when dropped.
+/// A lock left by a dead process is taken over.
 pub struct Lock(LockPath);
 
 impl Lock {
-    pub fn take(tour: &TourPath) -> Result<Self, Failure> {
-        let lock = tour.lock();
+    /// `busy` says what holds the lock, for the error when another process does.
+    pub fn take(lock: LockPath, busy: &str) -> Result<Self, Failure> {
         if let Some(folder) = lock.as_path().parent() {
             std::fs::create_dir_all(folder).map_err(|e| Failure(format!("cannot create {}: {e}", folder.display())))?;
         }
@@ -23,7 +23,7 @@ impl Lock {
                     let holder = std::fs::read_to_string(&lock).ok().and_then(|t| t.trim().parse::<i32>().ok());
                     match holder {
                         Some(pid) if is_alive(pid) => {
-                            return Err(Failure(format!("a tour for this branch is already being written (process {pid})")));
+                            return Err(Failure(format!("{busy} (process {pid})")));
                         }
                         _ => {
                             let _ = std::fs::remove_file(&lock);
@@ -64,19 +64,25 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    use crate::types::TourPath;
+
     fn tour_in(folder: &tempfile::TempDir) -> TourPath {
         TourPath::try_from(folder.path().join("b.json")).unwrap()
+    }
+
+    fn take(tour: &TourPath) -> Result<Lock, Failure> {
+        Lock::take(tour.lock(), "busy")
     }
 
     #[test]
     fn excludes_a_second_writer_and_releases_on_drop() {
         let folder = tempfile::tempdir().unwrap();
         let tour = tour_in(&folder);
-        let held = Lock::take(&tour).unwrap();
-        assert!(Lock::take(&tour).is_err());
+        let held = take(&tour).unwrap();
+        assert!(take(&tour).is_err());
         drop(held);
         assert!(!tour.lock().as_path().exists());
-        assert!(Lock::take(&tour).is_ok());
+        assert!(take(&tour).is_ok());
     }
 
     #[test]
@@ -84,6 +90,6 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let tour = tour_in(&folder);
         std::fs::write(PathBuf::from(tour.lock().as_path()), "999999999").unwrap();
-        assert!(Lock::take(&tour).is_ok());
+        assert!(take(&tour).is_ok());
     }
 }

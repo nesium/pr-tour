@@ -13,6 +13,7 @@ mod windows;
 use tauri::{Manager, WindowEvent};
 use windows::{OpenRequest, WindowLabel, Windows};
 
+pub use generate::ask::cli as ask_cli;
 pub use generate::cli as generate_cli;
 pub use launch_lock::LaunchLock;
 
@@ -57,6 +58,8 @@ pub fn run(args: Vec<String>, starting: LaunchLock) {
             commands::branch_tip,
             commands::file_diff,
             commands::diff_stat,
+            commands::read_answers,
+            commands::ask,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the PR tour app");

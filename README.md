@@ -133,6 +133,30 @@ tour leaves out, with **Rewrite the tour** to have the agent write it again
 and cover or skip them. Below it, **Skipped on purpose** lists
 the tour's `skipped` entries with their reasons and the files they match.
 
+### Asking about a step
+
+The **Ask** panel on the right of the Tour tab (`a` shows or hides it) takes a
+question about the current step. The agent gets the step's title, why, check
+and the hunks it points at, marked as data. The first question forks the
+session that wrote the tour, so that session stays untouched; later questions
+about the same tour continue that fork, so the agent remembers them. Without
+a usable session a fresh one answers. The agent can only read, as when writing
+a tour. One question per tour is answered at a time.
+
+Answers stay under their step. They live next to the tour, not in it, so a
+new tour keeps them (shown again only for the commit they were asked about):
+
+```
+<repo>/.git/pr-tours/<branch>.answers.json
+```
+
+From a terminal:
+
+```sh
+pr-tour ask --step <id> "Why is the marker written inside the lock?"
+pr-tour ask --step <id> --dry-run "…"   # show the agent and the prompt only
+```
+
 Drag the sidebar's edge to resize it; double-click the edge to reset it. The
 view, wrapping, theme and sidebar width are the same in every window, and
 change in all of them at once.

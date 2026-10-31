@@ -121,6 +121,11 @@ impl Windows {
         WindowContent::Start { message: self.start_message.lock().unwrap().clone() }
     }
 
+    /// The tour a tour window shows.
+    pub fn located(&self, label: &WindowLabel) -> Option<Located> {
+        self.tours.lock().unwrap().get(label).map(|w| w.located.clone())
+    }
+
     pub fn generation(&self, label: &WindowLabel) -> GenerationState {
         self.tours.lock().unwrap().get(label).map(|w| w.generation.clone()).unwrap_or_default()
     }
@@ -194,15 +199,22 @@ pub fn show_start(app: &AppHandle, message: Option<String>) {
     }
 }
 
-/// Emits `tour-changed` to the window whenever its tour or lock is written or removed.
+/// Emits `tour-changed` to the window whenever its tour or lock is written or
+/// removed, and `answers-changed` whenever its answers file is.
 fn watch(app: &AppHandle, label: &WindowLabel, tour: &TourPath) -> Result<RecommendedWatcher, String> {
     let folder = tour.as_path().parent().ok_or("tour has no folder")?.to_owned();
-    let names: Vec<_> = [tour.as_path(), tour.lock().as_path()].iter().filter_map(|p| p.file_name().map(ToOwned::to_owned)).collect();
+    let name = |path: &Path| path.file_name().map(ToOwned::to_owned);
+    let tour_names: Vec<_> = [name(tour.as_path()), name(tour.lock().as_path())].into_iter().flatten().collect();
+    let answers_name = name(tour.answers().as_path());
     let (app, label) = (app.clone(), label.clone());
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         let Ok(event) = event else { return };
-        if event.paths.iter().any(|p| p.file_name().is_some_and(|n| names.iter().any(|w| w == n))) {
+        let names: Vec<_> = event.paths.iter().filter_map(|p| p.file_name()).collect();
+        if names.iter().any(|n| tour_names.iter().any(|w| w == n)) {
             let _ = app.emit_to(label.as_str(), "tour-changed", ());
+        }
+        if names.iter().any(|n| answers_name.as_deref() == Some(*n)) {
+            let _ = app.emit_to(label.as_str(), "answers-changed", ());
         }
     })
     .map_err(|e| e.to_string())?;

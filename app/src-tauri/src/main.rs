@@ -4,7 +4,8 @@ const USAGE: &str = "usage:
   pr-tour open [branch] [--repo <path>] [--tour <file>] [--generate]
   pr-tour generate [branch] [--base <branch>] [--repo <path>] [--fresh | --session <id>]
                    [--force] [--output <file>] [--dry-run]
-  pr-tour validate <tour.json> [--repo <path>]";
+  pr-tour validate <tour.json> [--repo <path>]
+  pr-tour ask --step <id> [--repo <path>] [--branch <branch>] [--dry-run] <question>";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -12,6 +13,7 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("validate") => std::process::exit(pr_tour_lib::validate::cli(rest)),
         Some("generate") => std::process::exit(pr_tour_lib::generate_cli(rest)),
+        Some("ask") => std::process::exit(pr_tour_lib::ask_cli(rest)),
         Some("open") => std::process::exit(open_detached(rest)),
         Some("-h" | "--help" | "help") => println!("{USAGE}"),
         _ => pr_tour_lib::run(args, pr_tour_lib::LaunchLock::acquire()),

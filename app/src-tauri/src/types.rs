@@ -161,9 +161,22 @@ path_newtype!(
 );
 
 path_newtype!(
-    /// Exists while a tour is being written.
+    /// Exists while a tour is being written, or a question about it answered.
     LockPath,
     |_| Ok(())
+);
+
+path_newtype!(
+    /// The questions asked about a tour and their answers, next to the tour:
+    /// `<branch>.answers.json`. Kept apart so a new tour doesn't lose them.
+    AnswersPath,
+    |p| if p.extension().is_some_and(|e| e == "json") { Ok(()) } else { Err(format!("not an answers file: {}", p.display())) }
+);
+
+string_newtype!(
+    /// One question in an answers file: 12 hex characters.
+    AnswerId,
+    |v| if !v.is_empty() && v.bytes().all(|b| b.is_ascii_hexdigit()) { Ok(()) } else { Err(format!("not an answer id: {v:?}")) }
 );
 
 impl BranchName {
@@ -181,6 +194,22 @@ impl ToursFolder {
 impl TourPath {
     pub fn lock(&self) -> LockPath {
         LockPath(self.0.with_extension("lock"))
+    }
+
+    pub fn answers(&self) -> AnswersPath {
+        AnswersPath(self.0.with_extension("answers.json"))
+    }
+}
+
+impl AnswersPath {
+    /// Held while a question is answered: one at a time per tour.
+    pub fn lock(&self) -> LockPath {
+        LockPath(self.0.with_extension("lock"))
+    }
+
+    /// Held for the moment the file is rewritten.
+    pub fn write_lock(&self) -> LockPath {
+        LockPath(self.0.with_extension("write.lock"))
     }
 }
 
@@ -286,6 +315,9 @@ mod tests {
         let tour = folder.tour_for(&BranchName::try_from("fix/a/b").unwrap());
         assert_eq!(tour.as_path(), Path::new("/x/fix__a__b.json"));
         assert_eq!(tour.lock().as_path(), Path::new("/x/fix__a__b.lock"));
+        assert_eq!(tour.answers().as_path(), Path::new("/x/fix__a__b.answers.json"));
+        assert_eq!(tour.answers().lock().as_path(), Path::new("/x/fix__a__b.answers.lock"));
+        assert_eq!(tour.answers().write_lock().as_path(), Path::new("/x/fix__a__b.answers.write.lock"));
     }
 
     #[test]

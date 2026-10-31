@@ -9,8 +9,10 @@ import { progressKey, readProgress, writeProgress } from "./progress";
 import { entryMatches, searchQuery, type CodeOf } from "./search";
 import { applyTheme, type ThemeChoice } from "./theme";
 import { anchoredFiles, entries, filesOf, isStep, parseTour } from "./tour";
-import { highlightKey, type Anchor, type AnchorKey, type CommitId, type EntryId, type HighlightKey, type HunkIndex, type Progress, type ProgressKey, type RepoFile, type Side, type StepId, type Tour } from "./types";
+import { highlightKey, type Answers, type Anchor, type AnchorKey, type CommitId, type EntryId, type HighlightKey, type HunkIndex, type Progress, type ProgressKey, type RepoFile, type Side, type StepId, type Tour } from "./types";
 
+/** The agent's time limit and a minute's grace, as the generator allows it. */
+const ANSWER_GIVES_UP_AFTER_MS = 21 * 60 * 1000;
 /** git processes reading diffs at once. More stay queued, current page first. */
 const PARALLEL_DIFFS = 8;
 /** Writing a tour touches the folder several times in a row; reload once. */
@@ -51,6 +53,9 @@ export function createTourState() {
   const highlights = shallowReactive(new Map<HighlightKey, HighlightedLines>());
   const preferences = ref<Preferences>(DEFAULT_PREFERENCES);
   const query = ref("");
+  const answers = shallowRef<Answers>({ version: 1, entries: [] });
+  const askError = ref<string | null>(null);
+  const sending = ref(false);
 
   let key: ProgressKey | null = null;
   let loadNumber = 0;
@@ -101,6 +106,42 @@ export function createTourState() {
   const cycleTheme = () => setPreferences({ theme: THEMES[(THEMES.indexOf(preferences.value.theme) + 1) % THEMES.length] });
   const clampWidth = (width: number) => Math.round(Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, width)));
   const setSidebarWidth = (width: number) => setPreferences({ sidebarWidth: clampWidth(width) });
+  const toggleChat = () => setPreferences({ chatOpen: !preferences.value.chatOpen });
+
+  /** Answers about this tour's commit; questions about an older tour of the branch stay in the file. */
+  const currentAnswers = computed(() => answers.value.entries.filter((e) => e.head_sha === tour.value?.head_sha));
+  /**
+   * Whether a question is being answered. One the agent hasn't answered after
+   * its time limit was abandoned, e.g. by quitting the app.
+   */
+  const asking = computed(() => {
+    const cutoff = Date.now() - ANSWER_GIVES_UP_AFTER_MS;
+    return sending.value || answers.value.entries.some((e) => e.status === "pending" && Date.parse(e.asked_at) > cutoff);
+  });
+
+  async function loadAnswers() {
+    try {
+      answers.value = await api.readAnswers();
+    } catch {
+      // A window without a tour has no answers.
+    }
+  }
+
+  async function askQuestion(step: StepId, question: string): Promise<boolean> {
+    if (!question.trim() || asking.value) return false;
+    sending.value = true;
+    askError.value = null;
+    try {
+      await api.ask(step, question);
+      await loadAnswers();
+      return true;
+    } catch (e) {
+      askError.value = String(e);
+      return false;
+    } finally {
+      sending.value = false;
+    }
+  }
 
   function setProgress(change: Partial<Progress>) {
     progress.value = { ...progress.value, ...change };
@@ -322,10 +363,11 @@ export function createTourState() {
       clearTimeout(pending);
       pending = setTimeout(load, RELOAD_DEBOUNCE_MS);
     });
+    await api.onAnswersChanged(loadAnswers);
     // Listen before asking, so no update falls between the two.
     await api.onGeneration((state) => (generation.value = state));
     generation.value = await api.generationState();
-    await load();
+    await Promise.all([load(), loadAnswers()]);
   }
 
   async function chooseRepo(repo: string) {
@@ -375,6 +417,11 @@ export function createTourState() {
     cycleTheme,
     clampWidth,
     setSidebarWidth,
+    currentAnswers,
+    asking,
+    askError,
+    askQuestion,
+    toggleChat,
     query,
     searched,
     matching,

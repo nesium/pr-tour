@@ -2,7 +2,8 @@
 //! a malformed commit id or path is rejected before any command runs. All slow
 //! work is `async` and runs on Tauri's Tokio thread pool, not the main thread.
 
-use crate::types::{BranchName, CommitId, RepoFile, RepoRoot, TourPath};
+use crate::generate::ask::{self, Answers, Question};
+use crate::types::{BranchName, CommitId, RepoFile, RepoRoot, StepId, TourPath};
 use crate::windows::{self, GenerationState, OpenRequest, WindowContent, WindowLabel, Windows};
 use crate::stat::{self, FileStat};
 use crate::{git, validate};
@@ -97,3 +98,23 @@ pub async fn diff_stat(root: RepoRoot, base: CommitId, head: CommitId) -> Result
     Ok(stat::parse_numstat(&git::text(root.as_path(), &args).await?))
 }
 
+/// The questions asked about this window's tour, with their answers.
+#[tauri::command]
+pub async fn read_answers(window: Window, windows: State<'_, Windows>) -> Result<Answers, String> {
+    let located = windows.located(&WindowLabel::of(&window)).ok_or("this window has no tour")?;
+    Ok(ask::read(&located.path.answers()).await)
+}
+
+/// Records the question as pending and returns; the answer arrives in the
+/// answers file, which the window watches.
+#[tauri::command]
+pub async fn ask(window: Window, windows: State<'_, Windows>, step: StepId, question: String) -> Result<(), String> {
+    let located = windows.located(&WindowLabel::of(&window)).ok_or("this window has no tour")?;
+    let question = Question { root: located.root, branch: located.branch, tour: located.path, step, question };
+    let asked = ask::prepare(question, true).await.map_err(|e| e.to_string())?;
+    // The outcome, failures included, is written to the answers file.
+    tauri::async_runtime::spawn(async move {
+        let _ = asked.answer().await;
+    });
+    Ok(())
+}
