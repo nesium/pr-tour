@@ -5,6 +5,9 @@ import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, setting
 const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false"];
 const PROGRESS = "pr-tour.progress";
 const MAX_ROWS = 400;
+const CONTEXT = 3;
+const EXPAND_STEP = 20;
+const FOLD_AFTER = 8;
 const short = (sha) => (sha ?? "").slice(0, 7);
 const tourFileName = (branch) => `${branch.replaceAll("/", "__")}.json`;
 
@@ -19,10 +22,10 @@ function parseDiff(text) {
   const hunks = [];
   let hunk = null, old = 0, next = 0;
   for (const line of text.replace(/\n$/, "").split("\n")) {
-    const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/.exec(line);
+    const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/.exec(line);
     if (match) {
-      old = +match[1]; next = +match[2];
-      hunk = { header: line, context: match[3].trim(), rows: [] };
+      old = +match[1]; next = +match[3];
+      hunk = { header: line, oldStart: old, oldLen: +(match[2] ?? 1), newStart: next, newLen: +(match[4] ?? 1), rows: [] };
       hunks.push(hunk);
       continue;
     }
@@ -34,6 +37,29 @@ function parseDiff(text) {
   }
   return hunks;
 }
+
+// The whole file as one list: each hunk's rows, with the unchanged lines between hunks
+// (from the new file) filled in, so an anchor's window can grow past its hunk.
+// Without the new file (deleted at head), only the hunks are known.
+function fileRows(hunks, lines) {
+  const rows = [];
+  let oldAt = 1, newAt = 1;
+  const fill = (until) => {
+    for (; newAt <= until; newAt++, oldAt++) {
+      if (lines) rows.push({ kind: " ", gap: true, old: oldAt, new: newAt, text: (lines[newAt - 1] ?? "").replaceAll("\t", "    ") || " " });
+    }
+  };
+  hunks.forEach((h, i) => {
+    fill(h.newLen === 0 ? h.newStart : h.newStart - 1);
+    for (const row of h.rows) rows.push({ ...row, hunk: i });
+    oldAt = h.oldLen === 0 ? h.oldStart + 1 : h.oldStart + h.oldLen;
+    newAt = h.newLen === 0 ? h.newStart + 1 : h.newStart + h.newLen;
+  });
+  if (lines) fill(lines.length);
+  return rows;
+}
+
+const jumpsBetween = (a, b) => a.hunk !== undefined && b.hunk !== undefined && a.hunk !== b.hunk;
 
 const GITHUB = {
   dark: {
@@ -115,12 +141,19 @@ export default class PrTour extends View {
     if (tour.version !== 1 || !Array.isArray(tour.steps)) { this.tour = null; this.status = "Tour has an unknown format (expected version 1)"; return; }
     this.tour = tour;
     this.diffs = {};
+    this.windows = {};
     const tip = await exec("git", [...READ, "rev-parse", tour.branch ?? this.branch], { cwd: this.root });
     this.tip = tip.code === 0 ? tip.stdout.trim() : null;
     const files = new Set([...tour.steps.flatMap((s) => s.anchors.map((a) => a.file)), ...tour.concerns.filter((c) => c.anchor).map((c) => c.anchor.file)]);
     await Promise.all([...files].map(async (file) => {
-      const r = await exec("git", [...READ, "diff", "--no-ext-diff", "--no-color", tour.base_sha, tour.head_sha, "--", file], { cwd: this.root });
-      this.diffs[file] = r.code === 0 ? parseDiff(r.stdout) : { error: r.stderr.trim() };
+      const [diff, show] = await Promise.all([
+        exec("git", [...READ, "diff", "--no-ext-diff", "--no-color", tour.base_sha, tour.head_sha, "--", file], { cwd: this.root }),
+        exec("git", [...READ, "show", "--no-textconv", `${tour.head_sha}:${file}`], { cwd: this.root }),
+      ]);
+      if (diff.code !== 0) { this.diffs[file] = { error: diff.stderr.trim() }; return; }
+      const lines = show.code === 0 && !show.stdout.includes("\0") ? show.stdout.replace(/\n$/, "").split("\n") : null;
+      const hunks = parseDiff(diff.stdout);
+      this.diffs[file] = { hunks, rows: fileRows(hunks, lines) };
     }));
     if (!this.entries().some((e) => e.id === this.progress().current)) this.go(this.entries()[0].id);
   }
@@ -235,21 +268,57 @@ export default class PrTour extends View {
         .child(div().flex_none().text_size(11).text_color(g.muted).child(anchor.side === "old" ? `${range} (removed)` : range)));
     if (!diff) return box.child(div().p(12).text_color(g.muted).child("Loading diff…"));
     if (diff.error) return box.child(div().p(12).text_color(g.del.sign).child(diff.error));
-    const hunks = diff.filter((h) => h.rows.some((r) => inAnchor(r, anchor)));
-    if (!hunks.length) return box.child(div().p(12).text_color(g.selected).child("This anchor doesn't match any change in the diff."));
-    let budget = MAX_ROWS;
+    const { rows, hunks } = diff;
+    const window = this.windowFor(key, rows, anchor);
+    if (!window) return box.child(div().p(12).text_color(g.selected).child("This anchor doesn't match any change in the diff."));
+
     const code = v_flex().font_family(settings().font_family ?? "JetBrains Mono").text_size(12);
-    hunks.forEach((h) => {
-      if (budget <= 0) return;
-      code.child(h_flex().h(28).flex_none().items_center().bg(g.hunk.line)
-        .child(div().w(91).h_full().flex_none().bg(g.hunk.num))
-        .child(div().flex_1().min_w(0).px(10).truncate().text_color(g.muted).child(h.header)));
-      const rows = h.rows.slice(0, budget);
-      budget -= rows.length;
-      code.children(rows.map((r) => this.diffRow(r, anchor, g)));
-    });
-    if (budget <= 0) code.child(div().px(12).py(6).text_color(g.muted).child(`… showing the first ${MAX_ROWS} lines`));
+    const firstChange = rows.slice(window.lo, window.hi + 1).find((r) => r.hunk !== undefined);
+    code.child(this.expander(`up-${key}`, window.lo > 0 ? "↑" : null, hunks[firstChange?.hunk]?.header ?? "",
+      () => { window.lo = Math.max(0, window.lo - EXPAND_STEP); }, g));
+
+    let shown = 0;
+    for (let i = window.lo; i <= window.hi && shown < MAX_ROWS; i++) {
+      const row = rows[i];
+      if (i > window.lo && jumpsBetween(rows[i - 1], row)) {
+        code.child(this.expander(`jump-${key}-${i}`, null, hunks[row.hunk].header, null, g));
+      }
+      let end = i;
+      while (end + 1 <= window.hi && rows[end + 1].gap) end++;
+      const run = row.gap ? end - i + 1 : 0;
+      const start = i;
+      if (run > FOLD_AFTER && !window.open[start] && start !== window.lo && end !== window.hi) {
+        code.child(this.expander(`fold-${key}-${start}`, "↕", `${run} unchanged lines`, () => { window.open[start] = true; }, g));
+        i = end;
+        continue;
+      }
+      code.child(this.diffRow(row, anchor, g));
+      shown++;
+    }
+    if (shown >= MAX_ROWS) code.child(div().px(12).py(6).text_color(g.muted).child(`… showing the first ${MAX_ROWS} lines`));
+    if (window.hi < rows.length - 1) {
+      code.child(this.expander(`down-${key}`, "↓", "", () => { window.hi = Math.min(rows.length - 1, window.hi + EXPAND_STEP); }, g));
+    }
     return box.child(code);
+  }
+
+  // The rows an anchor shows: its own lines plus CONTEXT on each side, widened by the expanders.
+  windowFor(key, rows, anchor) {
+    if (this.windows[key]) return this.windows[key];
+    const hits = rows.flatMap((r, i) => (inAnchor(r, anchor) ? [i] : []));
+    if (!hits.length) return null;
+    const window = { lo: Math.max(0, hits[0] - CONTEXT), hi: Math.min(rows.length - 1, hits[hits.length - 1] + CONTEXT), open: {} };
+    this.windows[key] = window;
+    return window;
+  }
+
+  // GitHub's blue bar: an arrow in the gutter expands, the rest shows the hunk header.
+  expander(id, arrow, label, onExpand, g) {
+    const bar = h_flex().id(id).h(28).flex_none().items_center().bg(g.hunk.line)
+      .child(div().w(91).h_full().flex_none().flex().items_center().justify_center().bg(g.hunk.num).text_color(g.muted).child(arrow ?? ""))
+      .child(div().flex_1().min_w(0).px(10).truncate().text_color(g.muted).child(label));
+    if (!onExpand) return bar;
+    return bar.cursor_pointer().hover((s) => s.opacity(0.8)).on_click((_e, cx) => { onExpand(); cx.notify(); });
   }
 
   overview(t) {
