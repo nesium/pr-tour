@@ -143,15 +143,20 @@ pub async fn generate(request: &Request, progress: impl Fn(String)) -> Result<Ou
 }
 
 async fn run_claude(argv: &[String], prompt: &str, root: &RepoRoot, reply: Reply) -> Result<Value, Failure> {
+    let path = tokio::task::spawn_blocking(crate::tool_path::get).await.map_err(|e| Failure(e.to_string()))?;
     let mut child = Command::new(&argv[0])
         .args(&argv[1..])
+        .env("PATH", path)
         .current_dir(root.as_path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| Failure(format!("cannot run claude: {e}")))?;
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => Failure("cannot find `claude`: install Claude Code, or add its folder to your login shell's PATH".into()),
+            _ => Failure(format!("cannot run claude: {e}")),
+        })?;
     let mut stdin = child.stdin.take().expect("stdin is piped");
     let prompt = prompt.to_owned();
     let feeding = tokio::spawn(async move {

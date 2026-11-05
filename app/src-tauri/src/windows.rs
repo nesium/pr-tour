@@ -214,7 +214,7 @@ pub fn show_start(app: &AppHandle, message: Option<String>) {
     }
     let built = WebviewWindowBuilder::new(app, label.as_str(), WebviewUrl::App("index.html".into()))
         .title("PR Tour")
-        .inner_size(520.0, 320.0)
+        .inner_size(520.0, 360.0)
         .resizable(false)
         .build();
     if let Err(error) = built {

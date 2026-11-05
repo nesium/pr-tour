@@ -167,3 +167,14 @@ pub async fn branch_since(root: RepoRoot, from: CommitId, to: CommitId) -> Resul
         .collect();
     Ok(Since { linear: ancestor?.success, commits, files: stat::parse_numstat(&stat?) })
 }
+
+/// Whether the `pr-tour` command and the Claude Code skill are installed.
+#[tauri::command]
+pub async fn setup_status() -> Result<crate::install::Setup, String> {
+    tauri::async_runtime::spawn_blocking(crate::install::status).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn install_setup() -> Result<crate::install::Setup, String> {
+    tauri::async_runtime::spawn_blocking(crate::install::install).await.map_err(|e| e.to_string())?
+}

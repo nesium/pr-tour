@@ -4,10 +4,12 @@ mod generate;
 mod git;
 mod glob;
 mod hunks;
+pub mod install;
 mod launch_lock;
 mod locate;
 mod review;
 mod stat;
+mod tool_path;
 mod types;
 pub mod validate;
 mod windows;
@@ -36,6 +38,10 @@ pub fn run(args: Vec<String>, starting: LaunchLock) {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(Windows::default())
         .setup(move |app| {
+            std::thread::spawn(|| {
+                install::refresh_skill();
+                tool_path::get();
+            });
             if let Some(starting) = starting.take() {
                 starting.release_when_listening(&app.config().identifier);
             }
@@ -66,6 +72,8 @@ pub fn run(args: Vec<String>, starting: LaunchLock) {
             commands::ask,
             commands::read_review,
             commands::update_review,
+            commands::setup_status,
+            commands::install_setup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the PR tour app");

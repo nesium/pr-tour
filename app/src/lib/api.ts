@@ -54,7 +54,19 @@ export interface FileDiff {
   base_lines: string | null;
 }
 
+/** How a part of the setup stands; "elsewhere" was set up by hand or install.sh and is left alone. */
+export type SetupPart = "missing" | "installed" | "outdated" | "elsewhere";
+export interface Setup {
+  command: SetupPart;
+  skill: SetupPart;
+  commandPath: string;
+  skillPath: string;
+}
+
 export const api = {
+  setupStatus: () => invoke<Setup>("setup_status"),
+  /** Links the `pr-tour` command to this app and writes the Claude Code skill. */
+  installSetup: () => invoke<Setup>("install_setup"),
   windowContent: () => invoke<WindowContent>("window_content"),
   openRepo: (repo: string) => invoke<void>("open_repo", { repo }),
   generationState: () => invoke<GenerationState>("generation_state"),

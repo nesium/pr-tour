@@ -1,11 +1,31 @@
 <script setup lang="ts">
 import { open } from "@tauri-apps/plugin-dialog";
-import { computed, inject } from "vue";
+import { computed, inject, onMounted, ref } from "vue";
+import { api, type Setup } from "../lib/api";
 import { TOUR } from "../lib/useTour";
 
 const tour = inject(TOUR)!;
 const generation = computed(() => tour.generation.value);
 const canWrite = computed(() => tour.missing.value && !generation.value.running && !generation.value.failure);
+
+const setup = ref<Setup | null>(null);
+const installed = ref(false);
+const installFailure = ref<string | null>(null);
+const needsInstall = computed(() => [setup.value?.command, setup.value?.skill].some((p) => p === "missing" || p === "outdated"));
+
+onMounted(async () => {
+  if (tour.choosing.value) setup.value = await api.setupStatus().catch(() => null);
+});
+
+async function install() {
+  installFailure.value = null;
+  try {
+    setup.value = await api.installSetup();
+    installed.value = true;
+  } catch (e) {
+    installFailure.value = String(e);
+  }
+}
 
 async function chooseRepo() {
   const folder = await open({ directory: true, title: "Choose a repository" });
@@ -28,6 +48,16 @@ async function chooseRepo() {
       <button class="button" @click="tour.stopWriting()">Stop</button>
     </template>
     <button v-else-if="generation.failure" class="button" @click="tour.writeTour(false)">Try again</button>
+    <div v-if="tour.choosing.value && (needsInstall || installed)" class="setup small">
+      <template v-if="installed && !needsInstall">
+        Installed the <code>pr-tour</code> command and the <code>/pr-tour</code> skill. Restart running Claude Code sessions to use it.
+      </template>
+      <template v-else>
+        <span>Install the <code>pr-tour</code> command and the <code>/pr-tour</code> skill for Claude Code?</span>
+        <button class="button" @click="install">Install</button>
+      </template>
+      <div v-if="installFailure" class="failure">{{ installFailure }}</div>
+    </div>
   </div>
 </template>
 
@@ -57,6 +87,18 @@ async function chooseRepo() {
 }
 .failure {
   color: var(--gh-del-sign);
+}
+.setup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 440px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
 }
 .button {
   height: 28px;
