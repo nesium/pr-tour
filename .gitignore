@@ -1,5 +1,2 @@
-__pycache__/
 .DS_Store
-herdr/*/gpui-kit.d.ts
-herdr/*/herdr.d.ts
-herdr/*/jsconfig.json
+release/

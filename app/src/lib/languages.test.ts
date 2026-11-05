@@ -17,8 +17,8 @@ describe("languageFor", () => {
   it("knows files by name and extensions Shiki doesn't alias", () => {
     expect(of("Dockerfile")).toBe("docker");
     expect(of("ios/Podfile")).toBe("ruby");
-    expect(of("Sources/Crisp/Crisp.h")).toBe("c");
-    expect(of("Sources/Crisp/Bridge.m")).toBe("objective-c");
+    expect(of("Sources/Kit/Kit.h")).toBe("c");
+    expect(of("Sources/Kit/Bridge.m")).toBe("objective-c");
     expect(of("ci/build.yml")).toBe("yaml");
   });
 

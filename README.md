@@ -16,24 +16,67 @@ later anything published) is rendered from it.
 | `skill/PROMPT.md` | The instructions that shape a tour. Edit freely |
 | `skill/tour.schema.json` | The tour format (version 1) |
 | `app/` | The PR Tour app and the `pr-tour` command (Tauri 2, Vue, TypeScript, Rust): shows, writes and validates tours |
-| `herdr/pr-tour-open/` | The Herdr launcher behind the key: opens the app on the focused terminal's branch |
-| `install.sh` | Links the skill, the command and the mod into place |
+| `install.sh` | Builds the app from source and links the command and the skill into place |
+| `release.sh` | Builds the signed, notarized `.dmg` to share |
 
 ## Install
 
+PR Tour runs on macOS 13 or later. It needs:
+
+- [Claude Code](https://docs.claude.com/en/docs/claude-code), signed in: it
+  writes the tours
+- git, e.g. from the Xcode command line tools (`xcode-select --install`)
+- to build: [Rust](https://rustup.rs) (stable) and
+  [Node](https://nodejs.org) 20.19 or later
+
 ```sh
-git clone https://ci.nsm.one/mb/pr-tour.git ~/Documents/pr-tour
-~/Documents/pr-tour/install.sh
+git clone <this repository's URL> pr-tour
+cd pr-tour
+./install.sh
 ```
 
-This builds the app, then links `~/.local/bin/pr-tour` to it and
-`~/.claude/skills/pr-tour` and the Herdr mods to the checkout. After a
-`git pull`, run it again to rebuild. It refuses to replace a folder that isn't
-a link. Restart Claude Code sessions that were already running so they see
-the skill.
+`install.sh` builds the app, links `~/.local/bin/pr-tour` to it and
+`~/.claude/skills/pr-tour` to the checkout's `skill/` folder. Keep the
+checkout where it is: both are links into it. After a `git pull`, run
+`./install.sh` again to rebuild. It never replaces a file or folder that isn't
+a link. `~/.local/bin` needs to be on your PATH (Claude Code's installer
+usually puts it there).
 
-Requires Claude Code and git; building requires Rust and Node. Herdr is
-optional.
+Restart Claude Code sessions that were already running so they see
+`/pr-tour`.
+
+### From a release
+
+A signed `.dmg` (see below) needs no Rust, Node or checkout:
+
+1. Open `PR-Tour-<version>.dmg` and drag PR Tour into Applications.
+2. Open PR Tour from Applications and click **Install** in its window. This
+   links `~/.local/bin/pr-tour` to the app and writes the Claude Code skill to
+   `~/.claude/skills/pr-tour`. From a terminal,
+   `"/Applications/PR Tour.app/Contents/MacOS/pr-tour" install` does the same.
+3. Restart Claude Code sessions that were already running.
+
+To update, replace the app in Applications and open it once: it brings the
+skill up to date by itself. A skill or command set up by hand or by
+`install.sh` is never replaced.
+
+### Making a release
+
+```sh
+./release.sh                 # signed, notarized release/PR-Tour-<version>.dmg
+./release.sh --no-notarize   # signed only, to try it locally
+```
+
+It needs an Apple Developer ID. It builds a universal app (Apple silicon and
+Intel), signs it with the Developer ID Application certificate in the keychain, notarizes the app and the disk
+image, and staples both. Notarizing needs credentials stored once:
+
+```sh
+xcrun notarytool store-credentials pr-tour --apple-id <apple id> --team-id <team id>
+```
+
+Bump `version` in `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml`
+before a release.
 
 ## Use
 
@@ -65,20 +108,6 @@ pr-tour open release...feat/x --generate   # against release; rewrite a tour wit
 `pr-tour open` returns at once and hands over to the running app if there is
 one. Without a tour, the window offers to write one. Started from Finder, the
 app asks for a repository.
-
-### With one key in Herdr
-
-Bind the launcher in `~/.config/herdr-app/keys.json`:
-
-```json
-"global": { "cmd-shift-r": "mod.open:pr-tour-open" }
-```
-
-In a terminal in the repo, press the key. It runs
-`pr-tour open --repo <terminal's folder> --generate`: the app shows the tour of
-that terminal's branch, and when there is no tour yet and none is being
-written, starts writing one in the window. Pressing the key again never opens
-a second window or starts a second generation.
 
 ### Without an open session
 
