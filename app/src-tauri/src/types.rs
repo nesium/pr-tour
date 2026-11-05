@@ -100,10 +100,10 @@ string_newtype!(
 );
 
 string_newtype!(
-    /// A branch name as git knows it, e.g. `feat/x`.
+    /// A branch name as git knows it, e.g. `feat/x`. Git never allows `..` in one.
     BranchName,
     |v| {
-        if v.is_empty() || v.starts_with('-') || v.contains(char::is_whitespace) {
+        if v.is_empty() || v.starts_with('-') || v.contains(char::is_whitespace) || v.contains("..") {
             Err(format!("not a branch name: {v:?}"))
         } else {
             Ok(())
@@ -195,6 +195,37 @@ string_newtype!(
 impl BranchName {
     pub fn tour_file_name(&self) -> String {
         format!("{}.json", self.0.replace('/', "__"))
+    }
+}
+
+/// The branch a command names, given as `branch` or as `base...branch`:
+/// like git's three-dot range, the changes on branch since it left base.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchArg {
+    pub base: Option<BranchName>,
+    pub branch: BranchName,
+}
+
+impl TryFrom<&str> for BranchArg {
+    type Error = String;
+    fn try_from(value: &str) -> Result<Self, String> {
+        if let Some((base, branch)) = value.split_once("...") {
+            return Ok(BranchArg { base: Some(BranchName::try_from(base)?), branch: BranchName::try_from(branch)? });
+        }
+        if value.contains("..") {
+            return Err(format!("{value}: a tour covers base...branch (three dots), the changes since the branch left base"));
+        }
+        Ok(BranchArg { base: None, branch: BranchName::try_from(value)? })
+    }
+}
+
+impl BranchArg {
+    /// The base named in the range or by `--base`, but not both.
+    pub fn with_base(self, flag: Option<BranchName>) -> Result<(BranchName, Option<BranchName>), String> {
+        match (self.base, flag) {
+            (Some(_), Some(_)) => Err("name the base once: base...branch or --base".into()),
+            (base, flag) => Ok((self.branch, base.or(flag))),
+        }
     }
 }
 
@@ -325,6 +356,18 @@ mod tests {
         assert!(BranchName::try_from("feat/x").is_ok());
         assert!(BranchName::try_from("-x").is_err());
         assert!(BranchName::try_from("").is_err());
+        assert!(BranchName::try_from("a..b").is_err());
+    }
+
+    #[test]
+    fn branch_args_can_name_their_base() {
+        let name = |v: &str| BranchName::try_from(v).unwrap();
+        assert_eq!(BranchArg::try_from("feat/x").unwrap(), BranchArg { base: None, branch: name("feat/x") });
+        assert_eq!(BranchArg::try_from("main...feat/x").unwrap(), BranchArg { base: Some(name("main")), branch: name("feat/x") });
+        assert!(BranchArg::try_from("main..feat/x").is_err());
+        assert!(BranchArg::try_from("...feat/x").is_err());
+        assert!(BranchArg::try_from("main...feat/x").unwrap().with_base(Some(name("develop"))).is_err());
+        assert_eq!(BranchArg::try_from("feat/x").unwrap().with_base(Some(name("main"))).unwrap(), (name("feat/x"), Some(name("main"))));
     }
 
     #[test]

@@ -12,7 +12,7 @@ pub(crate) mod lock;
 mod prompt;
 mod sessions;
 
-use crate::types::{BranchName, CommitId, RepoRoot, SessionId, TourPath};
+use crate::types::{BranchArg, BranchName, CommitId, RepoRoot, SessionId, TourPath};
 use crate::validate;
 use facts::Facts;
 use prompt::{Agent, Reply};
@@ -85,6 +85,14 @@ pub async fn plan(request: &Request) -> Result<Plan, Failure> {
     if let Some(output) = &request.output {
         facts.tour_path = output.clone();
     }
+    let existing = tokio::fs::read_to_string(&facts.tour_path).await.ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    // A rewrite keeps the base the tour was written against, unless told otherwise.
+    let existing_base = existing.as_ref().and_then(|t| t["base"].as_str()).and_then(|b| BranchName::try_from(b).ok());
+    if let Some(base) = existing_base.filter(|b| request.base.is_none() && *b != facts.base) {
+        let tour_path = facts.tour_path.clone();
+        facts = facts::resolve(&request.repo, Some(facts.branch.clone()), Some(base)).await?;
+        facts.tour_path = tour_path;
+    }
     let session = match &request.agent {
         AgentChoice::Fresh => None,
         choice => {
@@ -100,9 +108,8 @@ pub async fn plan(request: &Request) -> Result<Plan, Failure> {
     };
     let prompt = prompt::build(&facts, session.is_some()).await?;
     let argv = prompt::claude_argv(session.as_ref().map_or(Agent::Fresh, |s| Agent::Fork(&s.id)), Reply::Tour)?;
-    let existing = tokio::fs::read_to_string(&facts.tour_path).await.ok();
-    let existing_head = existing.and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|t| t.get("head_sha").cloned());
-    let up_to_date = existing_head.is_some_and(|head| head == facts.head_sha.as_str());
+    let covers = |key: &str, sha: &CommitId| existing.as_ref().is_some_and(|t| t[key] == sha.as_str());
+    let up_to_date = covers("head_sha", &facts.head_sha) && covers("base_sha", &facts.base_sha);
     Ok(Plan { facts, session, prompt, argv, up_to_date })
 }
 
@@ -194,14 +201,14 @@ fn with_facts(output: Value, facts: &Facts, session: &SessionId) -> Value {
 }
 
 
-/// `pr-tour generate [branch] [--base <branch>] [--repo <path>] [--fresh | --session <id>]
+/// `pr-tour generate [[base...]branch] [--base <branch>] [--repo <path>] [--fresh | --session <id>]
 ///                   [--force] [--output <file>] [--dry-run]`
 pub fn cli(args: &[String]) -> i32 {
     let (request, dry_run) = match parse(args) {
         Ok(parsed) => parsed,
         Err(message) => {
             eprintln!("pr-tour generate: {message}");
-            eprintln!("usage: pr-tour generate [branch] [--base <branch>] [--repo <path>] [--fresh | --session <id>] [--force] [--output <file>] [--dry-run]");
+            eprintln!("usage: pr-tour generate [[base...]branch] [--base <branch>] [--repo <path>] [--fresh | --session <id>] [--force] [--output <file>] [--dry-run]");
             return 2;
         }
     };
@@ -246,6 +253,7 @@ fn show_plan(plan: &Plan) {
 fn parse(args: &[String]) -> Result<(Request, bool), String> {
     let mut request = Request { repo: PathBuf::from("."), branch: None, base: None, agent: AgentChoice::Newest, force: false, output: None };
     let mut dry_run = false;
+    let mut branch = None;
     let mut args = args.iter();
     fn value(flag: &str, args: &mut std::slice::Iter<String>) -> Result<String, String> {
         args.next().cloned().ok_or(format!("{flag} needs a value"))
@@ -264,9 +272,12 @@ fn parse(args: &[String]) -> Result<(Request, bool), String> {
                 request.output = Some(TourPath::try_from(path)?);
             }
             flag if flag.starts_with('-') => return Err(format!("unknown option {flag}")),
-            _ if request.branch.is_none() => request.branch = Some(BranchName::try_from(arg.as_str())?),
+            _ if branch.is_none() => branch = Some(BranchArg::try_from(arg.as_str())?),
             _ => return Err(format!("unexpected argument {arg}")),
         }
+    }
+    if let Some(branch) = branch {
+        (request.branch, request.base) = branch.with_base(request.base).map(|(b, base)| (Some(b), base))?;
     }
     Ok((request, dry_run))
 }

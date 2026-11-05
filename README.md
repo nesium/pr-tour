@@ -43,10 +43,12 @@ In the Claude Code session that wrote or knows the change:
 /pr-tour                      # the current branch
 /pr-tour feat/x               # another branch
 /pr-tour feat/x --base main   # with an explicit base
+/pr-tour main...feat/x        # the same, as a range
 ```
 
-Without `--base`, the base is `develop` if it exists, else `main`, else
-`master`.
+The tour covers what the branch changed since it left the base, like git's
+`base...branch`. Without a base, it's `develop` if it exists, else `main`, else
+`master`. Rewriting a tour keeps the base it was written against.
 
 The skill writes the tour, runs `pr-tour validate` until it passes, and opens
 it with `pr-tour open`. Each tour has one window; if it's already open, it
@@ -57,6 +59,7 @@ comes to the front and has already reloaded by itself.
 ```sh
 pr-tour open                  # the tour of the checked-out branch
 pr-tour open feat/x --generate   # another branch; write its tour if there is none
+pr-tour open release...feat/x --generate   # against release; rewrite a tour with another base
 ```
 
 `pr-tour open` returns at once and hands over to the running app if there is
@@ -83,11 +86,12 @@ From a terminal in the repo:
 
 ```sh
 pr-tour generate                  # the current branch
-pr-tour generate feat/x --base main
+pr-tour generate feat/x --base main   # or: pr-tour generate main...feat/x
 pr-tour generate --dry-run        # show the agent, the command and the prompt; run nothing
 ```
 
-The app's "Write the tour" button does the same. `pr-tour generate` forks the Claude Code session that knows the branch best: the newest
+Without a base, a rewrite keeps the tour's. The app's "Write the tour" button
+does the same. `pr-tour generate` forks the Claude Code session that knows the branch best: the newest
 one that edited files in the repo while on that branch, else the newest one
 that ran with it checked out. The fork gets that session's context; the
 session itself is left unchanged. Without such a session, it starts a fresh
@@ -215,7 +219,7 @@ app says so. Problems the validator finds in a tour show in a banner.
   next `/pr-tour` uses it.
 - **Tour format:** `skill/tour.schema.json`. Changing it means changing
   `app/src-tauri/src/validate.rs` and the app's views too.
-- **Opening a tour:** `pr-tour open [branch] [--repo <path>] [--tour <file>] [--generate]`.
+- **Opening a tour:** `pr-tour open [[base...]branch] [--base <branch>] [--repo <path>] [--tour <file>] [--generate]`.
   `--repo` defaults to the current folder, the branch to the one checked out.
 
 ## Where tours live

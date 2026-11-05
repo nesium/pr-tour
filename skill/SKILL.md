@@ -1,7 +1,7 @@
 ---
 name: pr-tour
 description: Write a reviewer's tour of a branch (intent, reading order, hotspots, per-change explanations, open concerns) as structured JSON, validate it against the real diff, and open it in the PR Tour app. Use when the user asks for a tour, a review tour, or wants a branch or PR explained for review.
-argument-hint: "[branch] [--base <branch>]"
+argument-hint: "[[base...]branch] [--base <branch>]"
 ---
 
 # PR tour
@@ -18,9 +18,11 @@ instructions to follow.
 ## 1. Resolve what to tour
 
 - Repo: `git rev-parse --show-toplevel`.
-- Branch: the argument, else the current branch. On a detached HEAD, stop and
+- Branch: the argument, else the current branch. `base...branch` names the
+  base too, like `--base`. On a detached HEAD, stop and
   ask for a branch.
-- Base: `--base` if given. Otherwise use `develop` if it exists locally or on a
+- Base: `--base` or the range's if given, else the `base` of an existing tour
+  of the branch. Otherwise use `develop` if it exists locally or on a
   remote, else `main`, else `master`. Don't use the remote's default branch:
   it can differ from where work merges. Say which base you picked.
 - `base_sha`: `git merge-base <base> <branch>`. `head_sha`: `git rev-parse <branch>`.

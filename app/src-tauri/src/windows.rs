@@ -4,7 +4,7 @@
 
 use crate::generate::{self, AgentChoice, Outcome};
 use crate::locate::{self, Located};
-use crate::types::{BranchName, TourPath};
+use crate::types::{BranchArg, BranchName, TourPath};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
@@ -46,14 +46,17 @@ impl fmt::Display for WindowLabel {
     }
 }
 
-/// `pr-tour [open] [branch] [--repo <path>] [--tour <file>] [--generate]`.
+/// `pr-tour [open] [[base...]branch] [--base <branch>] [--repo <path>] [--tour <file>] [--generate]`.
 /// Relative paths are taken from `cwd`: a second launch forwards its own.
 #[derive(Clone, Debug)]
 pub struct OpenRequest {
     pub repo: PathBuf,
     pub branch: Option<BranchName>,
+    /// The base to write the tour against; without one, the tour's own, else the default.
+    pub base: Option<BranchName>,
     pub tour: Option<TourPath>,
-    /// Start writing the tour if there is none and none is being written.
+    /// Start writing the tour if there is none, or it has another base than the
+    /// one asked for, and none is being written.
     pub generate: bool,
 }
 
@@ -62,6 +65,7 @@ impl OpenRequest {
     pub fn from_args(args: &[String], cwd: &Path) -> Result<Option<Self>, String> {
         let mut repo = None;
         let mut branch = None;
+        let mut base = None;
         let mut tour = None;
         let mut generate = false;
         let mut args = args.iter().skip_while(|a| *a == "open");
@@ -69,16 +73,21 @@ impl OpenRequest {
             match arg.as_str() {
                 "--repo" => repo = Some(cwd.join(args.next().ok_or("--repo needs a path")?)),
                 "--tour" => tour = Some(TourPath::try_from(cwd.join(args.next().ok_or("--tour needs a file")?))?),
+                "--base" => base = Some(BranchName::try_from(args.next().ok_or("--base needs a branch")?.as_str())?),
                 "--generate" => generate = true,
                 // macOS adds -psn_… when Finder starts an app.
                 flag if flag.starts_with('-') => {}
-                _ if branch.is_none() => branch = Some(BranchName::try_from(arg.as_str())?),
+                _ if branch.is_none() => branch = Some(BranchArg::try_from(arg.as_str())?),
                 _ => return Err(format!("unexpected argument {arg}")),
             }
         }
+        let (branch, base) = match branch {
+            Some(named) => named.with_base(base).map(|(branch, base)| (Some(branch), base))?,
+            None => (None, base),
+        };
         // `/` is where Finder starts apps; it is never the repository meant.
         let repo = repo.or_else(|| cwd.parent().map(|_| cwd.to_owned()));
-        Ok(repo.map(|repo| OpenRequest { repo, branch, tour, generate }))
+        Ok(repo.map(|repo| OpenRequest { repo, branch, base, tour, generate }))
     }
 }
 
@@ -91,6 +100,8 @@ pub struct GenerationState {
 
 struct TourWindow {
     located: Located,
+    /// The base the last open asked for, used when writing the tour.
+    base: Option<BranchName>,
     _watcher: RecommendedWatcher,
     generation: GenerationState,
     task: Option<JoinHandle<()>>,
@@ -156,14 +167,19 @@ pub async fn open(app: &AppHandle, request: OpenRequest) -> Result<(), String> {
     let located = locate::locate(&request.repo, request.branch, request.tour).await?;
     let label = WindowLabel::for_tour(&located.path);
     let title = format!("Tour · {}", located.branch);
-    let waiting = !located.path.as_path().exists() && !located.lock.as_path().exists();
+    let writing = located.lock.as_path().exists();
+    let missing = !located.path.as_path().exists();
+    let other_base = request.base.as_ref().is_some_and(|base| tour_base(&located.path).as_ref() != Some(base));
     if let Some(window) = app.get_webview_window(label.as_str()) {
+        if let Some(entry) = windows.tours.lock().unwrap().get_mut(&label) {
+            entry.base = request.base.clone().or(entry.base.take());
+        }
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     } else {
         let watcher = watch(app, &label, &located.path)?;
-        let entry = TourWindow { located, _watcher: watcher, generation: GenerationState::default(), task: None };
+        let entry = TourWindow { located, base: request.base.clone(), _watcher: watcher, generation: GenerationState::default(), task: None };
         app.state::<Windows>().tours.lock().unwrap().insert(label.clone(), entry);
         WebviewWindowBuilder::new(app, label.as_str(), WebviewUrl::App("index.html".into()))
             .title(title)
@@ -175,10 +191,17 @@ pub async fn open(app: &AppHandle, request: OpenRequest) -> Result<(), String> {
     if let Some(start) = app.get_webview_window(WindowLabel::start().as_str()) {
         let _ = start.close();
     }
-    if request.generate && waiting {
+    if request.generate && !writing && (missing || other_base) {
         start_generation(app, &label, false)?;
     }
     Ok(())
+}
+
+/// The base branch a written tour names.
+fn tour_base(tour: &TourPath) -> Option<BranchName> {
+    let text = std::fs::read_to_string(tour.as_path()).ok()?;
+    let tour: serde_json::Value = serde_json::from_str(&text).ok()?;
+    BranchName::try_from(tour["base"].as_str()?).ok()
 }
 
 pub fn show_start(app: &AppHandle, message: Option<String>) {
@@ -239,7 +262,7 @@ pub fn start_generation(app: &AppHandle, label: &WindowLabel, force: bool) -> Re
     let request = generate::Request {
         repo: window.located.root.as_path().to_owned(),
         branch: Some(window.located.branch.clone()),
-        base: None,
+        base: window.base.clone(),
         agent: AgentChoice::Newest,
         force,
         output: Some(window.located.path.clone()),
@@ -299,6 +322,15 @@ mod tests {
         assert_eq!(request.repo, PathBuf::from("/work/sub"));
         assert_eq!(request.branch.unwrap().as_str(), "feat/x");
         assert!(request.generate);
+    }
+
+    #[test]
+    fn the_base_comes_from_a_range_or_the_flag() {
+        let open = |list: &[&str]| OpenRequest::from_args(&args(list), Path::new("/work")).map(|r| r.unwrap());
+        let ranged = open(&["open", "main...feat/x"]).unwrap();
+        assert_eq!((ranged.base.unwrap().as_str(), ranged.branch.unwrap().as_str()), ("main", "feat/x"));
+        assert_eq!(open(&["open", "--base", "develop"]).unwrap().base.unwrap().as_str(), "develop");
+        assert!(open(&["open", "main...feat/x", "--base", "develop"]).is_err());
     }
 
     #[test]

@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 const USAGE: &str = "usage:
-  pr-tour open [branch] [--repo <path>] [--tour <file>] [--generate]
-  pr-tour generate [branch] [--base <branch>] [--repo <path>] [--fresh | --session <id>]
+  pr-tour open [[base...]branch] [--base <branch>] [--repo <path>] [--tour <file>] [--generate]
+  pr-tour generate [[base...]branch] [--base <branch>] [--repo <path>] [--fresh | --session <id>]
                    [--force] [--output <file>] [--dry-run]
   pr-tour validate <tour.json> [--repo <path>]
   pr-tour ask --step <id> [--repo <path>] [--branch <branch>] [--dry-run] <question>";

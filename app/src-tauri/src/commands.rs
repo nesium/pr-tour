@@ -88,7 +88,7 @@ pub fn cancel_generation(app: AppHandle, window: Window) {
 /// Opens the tour of the branch checked out in `repo`, chosen in the start window.
 #[tauri::command]
 pub async fn open_repo(app: AppHandle, repo: PathBuf) -> Result<(), String> {
-    windows::open(&app, OpenRequest { repo, branch: None, tour: None, generate: false }).await
+    windows::open(&app, OpenRequest { repo, branch: None, base: None, tour: None, generate: false }).await
 }
 
 /// Every file the tour's commits change, with its size. Renames count as a
